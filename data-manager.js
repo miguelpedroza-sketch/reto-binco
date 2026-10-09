@@ -348,6 +348,7 @@
       fMesa: U.parseDate(g('fechaMesa')),
       fAut: U.parseDate(g('fechaAutorizacion')),
       fColoc: U.parseDate(g('fechaColocacion')),
+      fColocReporte: U.parseDate(g('fechaColocacion')), // fecha de colocación del Funnel (se captura al autorizar)
       proximaAccion: String(g('proximaAccion') || '').trim().slice(0, 140),
     };
     if (!rec.fAsig) rec.fAsig = rec.fUlt || rec.fContacto;
@@ -475,7 +476,7 @@
           primeraCarga: prev.primeraCarga,
           fAsig: prev.fAsig || r.fAsig,
           fContacto: r.fContacto || prev.fContacto,
-          fExp: r.fExp || prev.fExp, fMesa: r.fMesa || prev.fMesa, fAut: r.fAut || prev.fAut, fColoc: r.fColoc || prev.fColoc || null,
+          fExp: r.fExp || prev.fExp, fMesa: r.fMesa || prev.fMesa, fAut: r.fAut || prev.fAut, fColoc: r.fColoc || prev.fColoc || null, fColocReporte: r.fColocReporte || prev.fColocReporte || null,
           monto: r.monto || prev.monto,
         });
         map.set(r.key, merged); actualizados++;
@@ -575,6 +576,11 @@
     // BINCO dejó de usar ICARUS: la fuente fija es el Funnel, salvo que se elija explícitamente "oficial".
     const usarFunnel = cfg.fuenteColocacion !== 'oficial';
     if (usarFunnel) {
+      // Igual que el Tablero comercial: un crédito con FECHA DE COLOCACIÓN en el Funnel cuenta como colocado
+      // en esa fecha aunque su estatus todavía diga "Autorizado" o "Por dispersar".
+      funnelEff.forEach((f) => {
+        if (!f.contratos.length && f.fColocReporte && ['autorizado', 'por_dispersar', 'colocado'].includes(f.etapa)) { f.pendienteValidar = true; f.etapaEf = 'por_dispersar'; }
+      });
       // Historial de colocación de meses cerrados (p. ej. tomado del Tablero comercial BINCO BI):
       // en esos meses la colocación es EXACTAMENTE la lista del historial (mes y monto), sin depender
       // de la fecha de última gestión del Funnel.
@@ -590,7 +596,8 @@
             .sort((a, b) => (b.etapa === 'colocado') - (a.etapa === 'colocado'));
           const f = cands[0] || null;
           const mEnd = U.monthEnd(it.mes + '-01');
-          const fecha = f && f.fUlt && f.fUlt.slice(0, 7) === it.mes ? f.fUlt : (f && f.fColoc && f.fColoc.slice(0, 7) === it.mes ? f.fColoc : mEnd);
+          const enMes = (d) => d && d.slice(0, 7) === it.mes;
+          const fecha = f && enMes(f.fColocReporte) ? f.fColocReporte : (f && enMes(f.fColoc) ? f.fColoc : (f && enMes(f.fUlt) ? f.fUlt : mEnd));
           const contrato = (f && f.contrato) || ('BI-' + U.hash(it.nameKey + it.mes + i).slice(0, 12));
           colocaciones.push({
             contrato, fecha, monto: Number(it.monto) || 0, asesorId: aId, asesorNombre: f ? f.asesorNombre : it.asesorNombre,
@@ -603,14 +610,14 @@
       }
       funnelEff.forEach((f) => {
         if (!f.pendienteValidar) return;
-        const fechaF = f.fColoc || f.fUlt || f.fAut || f.fAsig;
+        const fechaF = f.fColocReporte || f.fColoc || f.fUlt || f.fAut || f.fAsig;
         // En meses cubiertos por el historial solo cuenta lo que está en el historial
         if (fechaF && cubiertos.has(fechaF.slice(0, 7))) { f.etapaEf = 'colocado'; f.pendienteValidar = false; f.contratos = []; f.fueraDeHistorial = true; return; }
         const contrato = f.contrato || ('FN-' + U.hash(f.key).slice(0, 12));
         colocaciones.push({
           contrato, fecha: fechaF, monto: f.monto || 0, asesorId: f.asesorId, asesorNombre: f.asesorNombre,
           tipo: f.tipo, recuperado: f.recuperado, nombre: f.nombre, nombreNorm: f.nombreNorm, clienteId: f.clienteId,
-          funnelKey: f.key, matchVia: 'funnel', fuenteFunnel: true, fechaEstimada: !f.fColoc,
+          funnelKey: f.key, matchVia: 'funnel', fuenteFunnel: true, fechaEstimada: !(f.fColocReporte || f.fColoc),
         });
         f.etapaEf = 'colocado'; f.pendienteValidar = false; f.contratos = [contrato];
       });
