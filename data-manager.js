@@ -165,11 +165,12 @@
   const STAGES = [
     { key: 'lead', label: 'Lead', plural: 'Leads', idx: 0 },
     { key: 'contactado', label: 'Contactado', plural: 'Contactados', idx: 1 },
-    { key: 'expediente', label: 'Expediente', plural: 'Expedientes', idx: 2 },
-    { key: 'mesa', label: 'Mesa', plural: 'En Mesa', idx: 3 },
-    { key: 'autorizado', label: 'Autorizado', plural: 'Autorizados', idx: 4 },
-    { key: 'por_dispersar', label: 'Por dispersar', plural: 'Por dispersar', idx: 5 },
-    { key: 'colocado', label: 'Colocado', plural: 'Colocados', idx: 6 },
+    { key: 'interes', label: 'Interés', plural: 'Con interés', idx: 2 },
+    { key: 'expediente', label: 'Expediente', plural: 'Expedientes', idx: 3 },
+    { key: 'mesa', label: 'Mesa', plural: 'En Mesa', idx: 4 },
+    { key: 'autorizado', label: 'Autorizado', plural: 'Autorizados', idx: 5 },
+    { key: 'por_dispersar', label: 'Por dispersar', plural: 'Por dispersar', idx: 6 },
+    { key: 'colocado', label: 'Colocado', plural: 'Colocados', idx: 7 },
     { key: 'perdido', label: 'No continuó', plural: 'No continuaron', idx: -1 },
   ];
   const STAGE_IDX = Object.fromEntries(STAGES.map((s) => [s.key, s.idx]));
@@ -184,7 +185,8 @@
     ['autorizado', ['autoriz', 'aprobad', 'aceptad', 'preautoriz']],
     ['mesa', ['mesa', 'analisis', 'revision', 'evaluacion', 'comite', 'dictamen', 'validacion', 'credito en proceso', 'buro']],
     ['expediente', ['expediente', 'document', 'integracion', 'captura', 'solicitud', 'papeleria']],
-    ['contactado', ['contactad', 'interesad', 'contacto efectivo', 'cita', 'seguimiento', 'negociac', 'perfilad', 'cotiz', 'propuesta']],
+    ['interes', ['interes', 'interesad']],
+    ['contactado', ['contactad', 'contacto efectivo', 'cita', 'seguimiento', 'negociac', 'perfilad', 'cotiz', 'propuesta']],
     ['lead', ['nuevo', 'lead', 'asignad', 'pendiente', 'prospecto', 'sin gestion', 'base']],
   ];
 
@@ -733,12 +735,13 @@
   /* ---------------------------------------------------------------
    * 8. MÉTRICAS OFICIALES (reglas de cálculo documentadas en README)
    * ------------------------------------------------------------- */
-  const OPEN_STAGES = ['lead', 'contactado', 'expediente', 'mesa', 'autorizado', 'por_dispersar'];
+  const OPEN_STAGES = ['lead', 'contactado', 'interes', 'expediente', 'mesa', 'autorizado', 'por_dispersar'];
+  const SI = (k) => STAGE_IDX[k];
   const NOT_CONTACTED_RX = /no contest|ilocaliz|sin contact|no localiz|numero equivocado|buzon|no contact/;
 
   function isContacted(f) {
     if (f.contactado === true) return true;
-    if (f.contactado === false && STAGE_IDX[f.etapaEf] <= 1) return false;
+    if (f.contactado === false && STAGE_IDX[f.etapaEf] <= SI('contactado')) return false;
     if (f.etapaEf === 'perdido') return f.contactado !== false && !NOT_CONTACTED_RX.test(U.norm(f.etapaRaw));
     return STAGE_IDX[f.etapaEf] >= 1;
   }
@@ -754,8 +757,8 @@
     let mx = STAGE_IDX[f.etapaEf];
     (f.historial || []).forEach((h) => { if (STAGE_IDX[h.etapa] > mx) mx = STAGE_IDX[h.etapa]; });
     if (f.etapaEf === 'perdido' && mx < 0) mx = isContacted(f) ? 1 : 0;
-    if (f.pendienteValidar) mx = Math.min(mx, 5);
-    if (f.etapaEf !== 'colocado') mx = Math.min(mx, 5);
+    if (f.pendienteValidar) mx = Math.min(mx, SI('por_dispersar'));
+    if (f.etapaEf !== 'colocado') mx = Math.min(mx, SI('por_dispersar'));
     return mx;
   }
   /** Fecha en que el registro alcanzó la etapa: campo explícito → historial → última gestión → asignación. */
@@ -867,7 +870,7 @@
     // colocaciones sin registro en Funnel: cuentan como recorrido completo
     const huerfanas = coloc.filter((c) => !c.funnelKey);
 
-    const pipeline = ['lead', 'contactado', 'expediente', 'mesa', 'autorizado', 'colocado'].map((k) => ({ key: k, label: STAGES.find((s) => s.key === k).plural, n: 0, monto: 0, actual: 0, montoActual: 0 }));
+    const pipeline = ['lead', 'contactado', 'interes', 'expediente', 'mesa', 'autorizado', 'colocado'].map((k) => ({ key: k, label: STAGES.find((s) => s.key === k).plural, n: 0, monto: 0, actual: 0, montoActual: 0 }));
     enAlcance.forEach((f) => {
       const r = reachedIdx(f);
       pipeline.forEach((p) => {
@@ -885,7 +888,8 @@
     const cnt = (st) => abiertos.filter((f) => f.etapaEf === st);
     const sum = (arr) => arr.reduce((s, f) => s + (f.monto || 0), 0);
     const estado = {
-      enProceso: abiertos.filter((f) => STAGE_IDX[f.etapaEf] >= 2).length,
+      enProceso: abiertos.filter((f) => STAGE_IDX[f.etapaEf] >= SI('expediente')).length,
+      interes: cnt('interes').length, montoInteres: sum(cnt('interes')),
       expediente: cnt('expediente').length, mesa: cnt('mesa').length, autorizados: cnt('autorizado').length,
       porDispersar: cnt('por_dispersar').length, pendientesValidar: abiertos.filter((f) => f.pendienteValidar).length,
       montoMesa: sum(cnt('mesa')), montoAutorizados: sum(cnt('autorizado')), montoPorDispersar: sum(cnt('por_dispersar')),
@@ -899,13 +903,14 @@
     const pctContactacion = trabajados.length ? (contactados.length / trabajados.length) * 100 : null;
 
     // --- Eventos del periodo (para retos, puntos y racha)
-    const ev = { contactos: 0, expedientes: 0, mesa: 0, autorizados: 0 };
+    const ev = { contactos: 0, intereses: 0, expedientes: 0, mesa: 0, autorizados: 0 };
     fAll.forEach((f) => {
       const r = reachedIdx(f);
-      if (r >= 1 && isContacted(f) && U.inRange(stageDate(f, 'contactado'), range)) ev.contactos++;
-      if (r >= 2 && U.inRange(stageDate(f, 'expediente'), range)) ev.expedientes++;
-      if (r >= 3 && U.inRange(stageDate(f, 'mesa'), range)) ev.mesa++;
-      if (r >= 4 && U.inRange(stageDate(f, 'autorizado'), range)) ev.autorizados++;
+      if (r >= SI('contactado') && isContacted(f) && U.inRange(stageDate(f, 'contactado'), range)) ev.contactos++;
+      if (r >= SI('interes') && U.inRange(stageDate(f, 'interes'), range)) ev.intereses++;
+      if (r >= SI('expediente') && U.inRange(stageDate(f, 'expediente'), range)) ev.expedientes++;
+      if (r >= SI('mesa') && U.inRange(stageDate(f, 'mesa'), range)) ev.mesa++;
+      if (r >= SI('autorizado') && U.inRange(stageDate(f, 'autorizado'), range)) ev.autorizados++;
     });
     ev.colocados = creditos;
 
@@ -974,12 +979,12 @@
   const NEXT_ACTION = {
     por_dispersar: 'Confirmar firma y dispersión', autorizado: 'Agendar firma del contrato',
     mesa: 'Dar seguimiento a Mesa y resolver observaciones', expediente: 'Completar documentos y enviar a Mesa',
-    contactado: 'Integrar expediente', lead: 'Lograr primer contacto',
+    interes: 'Integrar expediente', contactado: 'Confirmar interés y pedir documentos', lead: 'Lograr primer contacto',
   };
   function nearClosings(ds, o) {
     const ids = o.asesorIds ? new Set(o.asesorIds) : null;
     return ds.funnel
-      .filter((f) => (!ids || ids.has(f.asesorId)) && OPEN_STAGES.includes(f.etapaEf) && STAGE_IDX[f.etapaEf] >= (o.minStage == null ? 2 : o.minStage))
+      .filter((f) => (!ids || ids.has(f.asesorId)) && OPEN_STAGES.includes(f.etapaEf) && STAGE_IDX[f.etapaEf] >= (o.minStage == null ? SI('expediente') : o.minStage))
       .filter((f) => !o.tipo || o.tipo === 'Todos' || f.tipo === o.tipo)
       .filter((f) => !o.etapa || o.etapa === 'Todas' || f.etapaEf === o.etapa)
       .sort((a, b) => (STAGE_IDX[b.etapaEf] - STAGE_IDX[a.etapaEf]) || (b.monto - a.monto))
@@ -1178,7 +1183,7 @@
           if (['expediente', 'mesa', 'autorizado', 'por_dispersar'].includes(stage) && age > 10) stage = R() < 0.16 ? 'colocado' : 'perdido';
           const clienteId = 'BC' + (clienteSeq++);
           const tel = '55' + String(Math.floor(10000000 + R() * 89999999));
-          const lag = Math.min(age, Math.floor(R() * 4) + (STAGE_IDX[stage] > 2 ? 3 : 0));
+          const lag = Math.min(age, Math.floor(R() * 4) + (STAGE_IDX[stage] > SI('expediente') ? 3 : 0));
           const fUlt = bd[Math.min(bd.length - 1, bd.indexOf(d) + lag)] || d;
           const row = {
             'Folio': 'F' + (folio++), 'Ejecutivo Comercial': nombreA, 'Nombre del Cliente': cli, 'ID Cliente': clienteId,

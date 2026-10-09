@@ -284,6 +284,7 @@
       <div class="card-title-x"><span>Mi pipeline</span><span class="tiny text-muted">${compact ? '' : 'acumulado del periodo'}</span></div>
       <div class="pipe">${rows}</div>
       <div class="state-chips">
+        ${e.interes ? `<span class="state-chip"><b>${e.interes}</b>con interés · ${U.moneyK(e.montoInteres)}</span>` : ''}
         <span class="state-chip"><b>${e.enProceso}</b>expedientes en proceso</span>
         <span class="state-chip"><b>${e.mesa}</b>en Mesa · ${U.moneyK(e.montoMesa)}</span>
         <span class="state-chip"><b>${e.autorizados}</b>autorizados · ${U.moneyK(e.montoAutorizados)}</span>
@@ -588,7 +589,7 @@
   function adminRows() {
     return G.teamRows(S.ds, S.cfg, range(), S.today, S.tipo).map((r) => ({
       id: r.id, nombre: r.nombre, m: r.m, meta: r.m.meta, monto: r.m.monto, avance: r.m.avance || 0, creditos: r.m.creditos, avCred: r.m.avanceCreditos || 0, ticket: r.m.ticket || 0,
-      contact: r.m.contactacion.pct || 0, exped: r.m.pipeline[2].n, mesa: r.m.estado.mesa, aut: r.m.estado.autorizados + r.m.estado.porDispersar, proy: r.m.proyeccion.potencial, puntos: r.puntos,
+      contact: r.m.contactacion.pct || 0, exped: r.m.pipeline.find((p) => p.key === 'expediente').n, mesa: r.m.estado.mesa, aut: r.m.estado.autorizados + r.m.estado.porDispersar, proy: r.m.proyeccion.potencial, puntos: r.puntos,
     }));
   }
   VIEWS.tablero = {

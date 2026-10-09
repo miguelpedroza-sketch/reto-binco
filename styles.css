@@ -139,7 +139,7 @@ body { min-height: 100vh; }
 .pipe-meta { text-align: right; font-size: .75rem; color: var(--muted); min-width: 92px; line-height: 1.15; }
 .pipe-meta strong { color: var(--ink); font-size: .82rem; }
 .pipe-arrow { font-size: .65rem; color: var(--muted); padding-left: 100px; line-height: 1; }
-.s-lead { background: #B9E9EA; } .s-contactado { background: #8FD9DB; } .s-expediente { background: #A9C2F1; }
+.s-lead { background: #B9E9EA; } .s-contactado { background: #8FD9DB; } .s-interes { background: #A6DCE8; } .s-expediente { background: #A9C2F1; }
 .s-mesa { background: #8EABEE; } .s-autorizado { background: #BBA6EC; } .s-colocado { background: var(--b-grad); }
 .state-chips { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .8rem; }
 .state-chip { background: var(--bg); border-radius: 10px; padding: .35rem .6rem; font-size: .75rem; color: var(--ink-2); }
@@ -203,7 +203,7 @@ body { min-height: 100vh; }
 .sp-por_dispersar { background: var(--b-magenta-soft); color: var(--b-magenta); }
 .sp-autorizado { background: var(--b-morado-soft); color: var(--b-morado); }
 .sp-mesa { background: var(--b-azul-soft); color: var(--b-azul); }
-.sp-expediente, .sp-contactado, .sp-lead { background: var(--b-turquesa-soft); color: #00797C; }
+.sp-expediente, .sp-interes, .sp-contactado, .sp-lead { background: var(--b-turquesa-soft); color: #00797C; }
 
 /* Logros */
 .ach-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }

@@ -5,7 +5,7 @@
  * (incluida publicacion.json); si no hay conexión, usa la última copia guardada.
  * Al publicar una versión nueva del código, sube el número de CACHE.
  * ===================================================================== */
-const CACHE = 'binco-reto-v7';
+const CACHE = 'binco-reto-v8';
 const SHELL = [
   './', './index.html', './styles.css', './app.js', './data-manager.js', './gamification.js',
   './manifest.webmanifest', './bootstrap.min.css', './bootstrap.bundle.min.js',
