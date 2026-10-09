@@ -461,10 +461,13 @@
       const stamp = r.fUlt || fechaCorte;
       if (!prev) {
         r.historial = [{ etapa: r.etapa, fecha: stamp }];
+        if (r.etapa === 'colocado' && !r.fColoc) r.fColoc = r.fUlt || fechaCorte; // se congela: no se moverá si después cambia la última gestión
         r.cargaId = cargaId; r.primeraCarga = cargaId;
         map.set(r.key, r); nuevos++;
       } else {
         const hist = (prev.historial || []).slice();
+        // la fecha de colocación se fija la primera vez que el registro aparece como colocado
+        if (r.etapa === 'colocado' && !r.fColoc) r.fColoc = prev.etapa === 'colocado' ? (prev.fColoc || prev.fUlt || null) : (r.fUlt || fechaCorte);
         if (prev.etapa !== r.etapa) hist.push({ etapa: r.etapa, fecha: stamp });
         const merged = Object.assign({}, prev, r, {
           historial: hist,
@@ -472,7 +475,7 @@
           primeraCarga: prev.primeraCarga,
           fAsig: prev.fAsig || r.fAsig,
           fContacto: r.fContacto || prev.fContacto,
-          fExp: r.fExp || prev.fExp, fMesa: r.fMesa || prev.fMesa, fAut: r.fAut || prev.fAut, fColoc: r.fColoc || prev.fColoc,
+          fExp: r.fExp || prev.fExp, fMesa: r.fMesa || prev.fMesa, fAut: r.fAut || prev.fAut, fColoc: r.fColoc || prev.fColoc || null,
           monto: r.monto || prev.monto,
         });
         map.set(r.key, merged); actualizados++;
@@ -572,11 +575,40 @@
     // BINCO dejó de usar ICARUS: la fuente fija es el Funnel, salvo que se elija explícitamente "oficial".
     const usarFunnel = cfg.fuenteColocacion !== 'oficial';
     if (usarFunnel) {
+      // Historial de colocación de meses cerrados (p. ej. tomado del Tablero comercial BINCO BI):
+      // en esos meses la colocación es EXACTAMENTE la lista del historial (mes y monto), sin depender
+      // de la fecha de última gestión del Funnel.
+      const hist = cfg.historialColocacion;
+      const cubiertos = new Set((hist && hist.meses) || []);
+      const usadosHist = new Set();
+      if (hist && hist.items && hist.items.length) {
+        const porNombre = new Map();
+        funnelEff.forEach((f) => { const k = U.nameKey(f.nombreNorm) + '|' + f.asesorId; if (!porNombre.has(k)) porNombre.set(k, []); porNombre.get(k).push(f); });
+        hist.items.forEach((it, i) => {
+          const aId = reAlias(it.asesorId);
+          const cands = (porNombre.get(it.nameKey + '|' + aId) || []).filter((f) => !usadosHist.has(f.key))
+            .sort((a, b) => (b.etapa === 'colocado') - (a.etapa === 'colocado'));
+          const f = cands[0] || null;
+          const mEnd = U.monthEnd(it.mes + '-01');
+          const fecha = f && f.fUlt && f.fUlt.slice(0, 7) === it.mes ? f.fUlt : (f && f.fColoc && f.fColoc.slice(0, 7) === it.mes ? f.fColoc : mEnd);
+          const contrato = (f && f.contrato) || ('BI-' + U.hash(it.nameKey + it.mes + i).slice(0, 12));
+          colocaciones.push({
+            contrato, fecha, monto: Number(it.monto) || 0, asesorId: aId, asesorNombre: f ? f.asesorNombre : it.asesorNombre,
+            tipo: f ? f.tipo : (it.tipo || 'Otros'), recuperado: f ? f.recuperado : false, nombre: f ? f.nombre : it.cliente,
+            nombreNorm: U.normName(it.cliente), clienteId: f ? f.clienteId : '', funnelKey: f ? f.key : null,
+            matchVia: 'historial', fuenteHistorial: true,
+          });
+          if (f) { usadosHist.add(f.key); f.etapaEf = 'colocado'; f.pendienteValidar = false; f.contratos = [contrato]; }
+        });
+      }
       funnelEff.forEach((f) => {
         if (!f.pendienteValidar) return;
+        const fechaF = f.fColoc || f.fUlt || f.fAut || f.fAsig;
+        // En meses cubiertos por el historial solo cuenta lo que está en el historial
+        if (fechaF && cubiertos.has(fechaF.slice(0, 7))) { f.etapaEf = 'colocado'; f.pendienteValidar = false; f.contratos = []; f.fueraDeHistorial = true; return; }
         const contrato = f.contrato || ('FN-' + U.hash(f.key).slice(0, 12));
         colocaciones.push({
-          contrato, fecha: f.fColoc || f.fUlt || f.fAut || f.fAsig, monto: f.monto || 0, asesorId: f.asesorId, asesorNombre: f.asesorNombre,
+          contrato, fecha: fechaF, monto: f.monto || 0, asesorId: f.asesorId, asesorNombre: f.asesorNombre,
           tipo: f.tipo, recuperado: f.recuperado, nombre: f.nombre, nombreNorm: f.nombreNorm, clienteId: f.clienteId,
           funnelKey: f.key, matchVia: 'funnel', fuenteFunnel: true, fechaEstimada: !f.fColoc,
         });

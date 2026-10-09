@@ -1075,7 +1075,12 @@
           ${aj.map((a) => `<tr><td>${esc(prettyName(a.asesorNombre))}</td><td>${esc(a.cliente)}</td><td>${esc(a.fuente)}</td><td class="text-end num">${U.money(a.monto)}</td><td class="${a.estado.key === 'perdido' ? 'warn-text' : a.estado.key === 'dispersado' ? 'ok-text' : ''}">${esc(a.estado.label)}</td></tr>`).join('')}</tbody></table></div></details>
       </div>`;
     }).join('');
-    return `<div class="cardx"><div class="card-title-x"><span>Ajuste de cierre de mes</span><span>📌</span></div>
+    const H = S.cfg.historialColocacion;
+    const histHtml = H && H.items && H.items.length ? `<div class="cardx mt-3"><div class="card-title-x"><span>Historial de colocación (Tablero comercial BINCO BI)</span><button class="btn btn-sm btn-light text-danger" data-act="borrarHistorial">Quitar historial</button></div>
+      <p class="small mb-2">En estos meses la colocación es exactamente la del Tablero comercial (mes y monto), sin depender de la fecha de última gestión del Funnel. ${H.fuente ? 'Fuente: ' + esc(H.fuente) + '.' : ''}</p>
+      <div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>Mes</th><th class="text-end">Créditos</th><th class="text-end">Monto</th></tr></thead><tbody>
+      ${H.meses.map((m) => { const it = H.items.filter((x) => x.mes === m); return `<tr><td>${esc(U.monthName(m + '-01'))}</td><td class="text-end">${it.length}</td><td class="text-end num">${U.money(it.reduce((a, x) => a + x.monto, 0))}</td></tr>`; }).join('')}</tbody></table></div></div>` : '';
+    return histHtml + `<div class="cardx${histHtml ? ' mt-3' : ''}"><div class="card-title-x"><span>Ajuste de cierre de mes</span><span>📌</span></div>
       <p class="small mb-2">Registra aquí las operaciones que se tomaron para el bono de un mes aunque se hayan dispersado después o sigan en Mesa / Expediente. La app las <b>suma a ese mes</b> (etiquetadas como "ajuste de cierre", aparte de lo real) y las <b>excluye de los meses siguientes</b>: si se dispersan después no vuelven a sumar, y salen del pipeline, la proyección, los puntos y los retos. Todo lo demás se mide por su fecha real.</p>
       <p class="small text-muted mb-2">Acepta la calculadora de bonos (.xlsx) o cualquier lista con columnas Asesor, Cliente, Monto (opcionales: Tipo, Estatus, Fuente, Fecha, Folio, Contrato, Considerada). Si una operación nunca se dispersa, se queda en el mes del cierre y se marca "No prosperó" para seguimiento.</p>
       <label class="btn btn-binco mb-0">📂 Cargar calculadora / lista de cierre<input type="file" accept=".xlsx,.xls,.csv" hidden id="cierreFile"></label>
@@ -1184,7 +1189,7 @@
   }
   function publicCfg() {
     const c = JSON.parse(JSON.stringify(S.cfg));
-    ['adminPin', 'mappings', 'api', 'asesorAlias', 'stageMap', 'publicUrl', 'teamKey', 'cierres', 'netlify', 'github', 'cambiosSinPublicar', 'ultimaPublicacion'].forEach((k) => delete c[k]);
+    ['adminPin', 'mappings', 'api', 'asesorAlias', 'stageMap', 'publicUrl', 'teamKey', 'cierres', 'netlify', 'github', 'cambiosSinPublicar', 'ultimaPublicacion', 'historialColocacion'].forEach((k) => delete c[k]);
     Object.values(c.asesores).forEach((a) => { delete a.pin; delete a.token; });
     return c;
   }
@@ -1314,6 +1319,7 @@
     }
     switch (d.act) {
       case 'pendientes': return showPendientes();
+      case 'borrarHistorial': if (confirm('¿Quitar el historial de colocación? Esos meses volverán a calcularse con las fechas del Funnel.')) { delete S.cfg.historialColocacion; saveCfg(); rebuild(); render(); } return;
       case 'goCierres': S.view = 'config'; S.cfgTab = 'cierres'; render(); return;
       case 'cancelCierre': S.pendingCierre = null; render(); return;
       case 'saveCierre': {
