@@ -1080,7 +1080,19 @@
       <p class="small mb-2">En estos meses la colocación es exactamente la del Tablero comercial (mes y monto), sin depender de la fecha de última gestión del Funnel. ${H.fuente ? 'Fuente: ' + esc(H.fuente) + '.' : ''}</p>
       <div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>Mes</th><th class="text-end">Créditos</th><th class="text-end">Monto</th></tr></thead><tbody>
       ${H.meses.map((m) => { const it = H.items.filter((x) => x.mes === m); return `<tr><td>${esc(U.monthName(m + '-01'))}</td><td class="text-end">${it.length}</td><td class="text-end num">${U.money(it.reduce((a, x) => a + x.monto, 0))}</td></tr>`; }).join('')}</tbody></table></div></div>` : '';
-    return histHtml + `<div class="cardx${histHtml ? ' mt-3' : ''}"><div class="card-title-x"><span>Ajuste de cierre de mes</span><span>📌</span></div>
+    const PT = S.pendingTablero;
+    const porA = PT ? PT.items.reduce((o, it) => { const k = it.asesorNombre || 'Sin asesor reconocido'; o[k] = o[k] || { n: 0, m: 0 }; o[k].n++; o[k].m += it.monto; return o; }, {}) : null;
+    const tableroHtml = `<div class="cardx"><div class="card-title-x"><span>Actualizar colocación desde el Tablero comercial</span><span>📋</span></div>
+      <ol class="small mb-2 ps-3"><li>En BINCO BI abre <b>Tablero comercial</b> y elige el mes.</li><li>Da clic en la página, presiona <b>Ctrl + A</b> y luego <b>Ctrl + C</b>.</li><li>Pega aquí (<b>Ctrl + V</b>) y presiona <b>Leer</b>.</li></ol>
+      <textarea class="form-control form-control-sm mb-2" id="tabTexto" rows="3" placeholder="Pega aquí el contenido del Tablero comercial…"></textarea>
+      <div class="d-flex flex-wrap gap-2 align-items-end"><div><label class="form-label small mb-0">Mes (si no se detecta)</label><input type="month" class="form-control form-control-sm" id="tabMes" value="${esc((PT && PT.mes) || U.monthKey(S.today))}"></div><button class="btn btn-sm btn-binco" data-act="leerTablero">Leer</button></div>
+      ${PT ? `<div class="mt-3 p-2 rounded-3" style="background:var(--b-azul-soft)"><div class="small"><b>${esc(U.monthName((PT.mes || '') + '-01'))}</b>: ${PT.items.length} créditos colocados · <b>${U.money(PT.items.reduce((a, x) => a + x.monto, 0))}</b></div>
+        <div class="tiny mt-1">${Object.entries(porA).map(([k, v]) => `${esc(k)}: ${v.n} · ${U.money(v.m)}`).join(' &nbsp;|&nbsp; ')}</div>
+        ${PT.items.some((x) => !x.asesorId) ? '<div class="warn-text tiny mt-1">⚠️ Hay créditos sin asesor reconocido; revisa los nombres en Ajustes → Metas y asesores.</div>' : ''}
+        <div class="d-flex gap-2 mt-2"><button class="btn btn-sm btn-binco" data-act="guardarTablero">Guardar como colocación de ${esc(U.monthName((PT.mes || '') + '-01'))}</button><button class="btn btn-sm btn-light" data-act="cancelarTablero">Cancelar</button></div>
+        <div class="tiny text-muted mt-1">Reemplaza la colocación de ese mes por exactamente esta lista (mes y monto del Tablero). Lo ya pagado en un cierre anterior no se vuelve a sumar.</div></div>` : ''}
+    </div>`;
+    return tableroHtml + histHtml + `<div class="cardx mt-3"><div class="card-title-x"><span>Ajuste de cierre de mes</span><span>📌</span></div>
       <p class="small mb-2">Registra aquí las operaciones que se tomaron para el bono de un mes aunque se hayan dispersado después o sigan en Mesa / Expediente. La app las <b>suma a ese mes</b> (etiquetadas como "ajuste de cierre", aparte de lo real) y las <b>excluye de los meses siguientes</b>: si se dispersan después no vuelven a sumar, y salen del pipeline, la proyección, los puntos y los retos. Todo lo demás se mide por su fecha real.</p>
       <p class="small text-muted mb-2">Acepta la calculadora de bonos (.xlsx) o cualquier lista con columnas Asesor, Cliente, Monto (opcionales: Tipo, Estatus, Fuente, Fecha, Folio, Contrato, Considerada). Si una operación nunca se dispersa, se queda en el mes del cierre y se marca "No prosperó" para seguimiento.</p>
       <label class="btn btn-binco mb-0">📂 Cargar calculadora / lista de cierre<input type="file" accept=".xlsx,.xls,.csv" hidden id="cierreFile"></label>
@@ -1319,6 +1331,24 @@
     }
     switch (d.act) {
       case 'pendientes': return showPendientes();
+      case 'leerTablero': {
+        const txt = $('#tabTexto').value;
+        const r = D.parseTableroTexto(txt, S.cfg);
+        if (!r.mes) r.mes = $('#tabMes').value;
+        r.items.forEach((it) => { it.mes = r.mes; });
+        if (!r.items.length) return toast('No encontré créditos "Colocado" en el texto. Copia toda la página del Tablero comercial (Ctrl + A, Ctrl + C).');
+        S.pendingTablero = r; render(); return;
+      }
+      case 'cancelarTablero': S.pendingTablero = null; render(); return;
+      case 'guardarTablero': {
+        const PT = S.pendingTablero; if (!PT) return;
+        const H = S.cfg.historialColocacion || { meses: [], items: [] };
+        H.items = H.items.filter((x) => x.mes !== PT.mes).concat(PT.items);
+        if (!H.meses.includes(PT.mes)) H.meses.push(PT.mes);
+        H.meses.sort(); H.fuente = 'Tablero comercial BINCO BI (actualizado ' + U.fmtDate(S.today) + ')';
+        S.cfg.historialColocacion = H; S.pendingTablero = null;
+        saveCfg(); rebuild(); render(); toast('Colocación de ' + U.monthName(PT.mes + '-01') + ' actualizada con el Tablero comercial.'); return;
+      }
       case 'borrarHistorial': if (confirm('¿Quitar el historial de colocación? Esos meses volverán a calcularse con las fechas del Funnel.')) { delete S.cfg.historialColocacion; saveCfg(); rebuild(); render(); } return;
       case 'goCierres': S.view = 'config'; S.cfgTab = 'cierres'; render(); return;
       case 'cancelCierre': S.pendingCierre = null; render(); return;

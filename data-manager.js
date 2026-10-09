@@ -608,6 +608,8 @@
           if (f) { usadosHist.add(f.key); f.etapaEf = 'colocado'; f.pendienteValidar = false; f.contratos = [contrato]; }
         });
       }
+      // en meses cubiertos solo cuenta el historial (se descartan otras fuentes de ese mes)
+      if (cubiertos.size) colocaciones = colocaciones.filter((c) => c.fuenteHistorial || !c.fecha || !cubiertos.has(c.fecha.slice(0, 7)));
       funnelEff.forEach((f) => {
         if (!f.pendienteValidar) return;
         const fechaF = f.fColocReporte || f.fColoc || f.fUlt || f.fAut || f.fAsig;
@@ -776,6 +778,30 @@
     }
     return out;
   }
+  /** Lee el texto copiado (Ctrl+A, Ctrl+C) del Tablero comercial de BINCO BI y obtiene los colocados del mes. */
+  const MESES_TXT = { ene: '01', feb: '02', mar: '03', abr: '04', may: '05', jun: '06', jul: '07', ago: '08', sep: '09', oct: '10', nov: '11', dic: '12' };
+  function parseTableroTexto(texto, cfg) {
+    const lineas = String(texto || '').split(/\r?\n/).map((x) => x.replace(/\u00a0/g, ' ').trim());
+    let mes = null;
+    const mc = String(texto).match(/corte de\s+([a-záéíóú]{3})[a-z]*\.?\s+(20\d\d)/i);
+    if (mc && MESES_TXT[U.norm(mc[1]).slice(0, 3)]) mes = mc[2] + '-' + MESES_TXT[U.norm(mc[1]).slice(0, 3)];
+    const asesores = Object.keys((cfg && cfg.asesores) || {}).map((id) => ({ id, nombre: (cfg.asesores[id].nombre || id), clave: U.normName(cfg.asesores[id].nombre || id).split(' ').slice(0, 2).join(' ') }));
+    const items = [];
+    for (let i = 0; i < lineas.length; i++) {
+      const m = lineas[i].match(/^Colocado(?:\t+| {1,3})(?!\(|vs\b|a la fecha)(.+)$/);
+      if (!m) continue;
+      let cliente = m[1].split('\t')[0].trim();
+      // el detalle puede venir en la misma línea o en la siguiente
+      const resto = (m[1].split('\t').slice(1).join('\t') + ' \t ' + (lineas[i + 1] || '')).trim();
+      const monto = U.parseMoney((resto.match(/\$\s?[\d,]+(?:\.\d+)?/) || [''])[0]);
+      const nr = U.normName(resto);
+      const a = asesores.find((x) => x.clave && nr.includes(x.clave));
+      if (!cliente || !monto || /^\d/.test(cliente)) continue;
+      items.push({ cliente, nameKey: U.nameKey(cliente), asesorId: a ? a.id : '', asesorNombre: a ? a.nombre : '', monto, mes });
+    }
+    return { mes, items };
+  }
+
   function parseCierreWorkbook(wb, cfg) {
     let best = null, metas = { asesores: {}, equipo: null };
     wb.SheetNames.forEach((name) => {
@@ -1289,6 +1315,6 @@
     compute, dailySeries, weeklySeries, nearClosings, activityDays, metaMensual, metaRange, metaEquipoRange, progressLevel,
     isContacted, isWorked, reachedIdx, stageDate,
     Store, ConfigStore, FileSource, ApiSource, deepMerge, demoData,
-    applyCierres, parseCierreMatrix, parseCierreWorkbook, parseMetasMatrix,
+    applyCierres, parseCierreMatrix, parseCierreWorkbook, parseMetasMatrix, parseTableroTexto,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
