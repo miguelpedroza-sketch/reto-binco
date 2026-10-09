@@ -768,14 +768,20 @@
     return f.fUlt || f.fAsig;
   }
 
-  function metaMensual(cfg, asesorId, mk) {
-    const byMonth = (cfg.metas && cfg.metas[mk]) || {};
+  /** Tipos de meta: 'monto' (colocación $) y 'creditos' (número de créditos colocados). */
+  const META_KEYS = {
+    monto: { mes: 'metas', base: 'metaBase', equipo: 'metaEquipo', redondeo: (x) => Math.round(x) },
+    creditos: { mes: 'metasCreditos', base: 'metaCreditosBase', equipo: 'metaEquipoCreditos', redondeo: (x) => Math.round(x * 10) / 10 },
+  };
+  function metaMensual(cfg, asesorId, mk, tipoMeta) {
+    const K = META_KEYS[tipoMeta || 'monto'];
+    const byMonth = (cfg[K.mes] && cfg[K.mes][mk]) || {};
     if (byMonth[asesorId] != null && byMonth[asesorId] !== '') return Number(byMonth[asesorId]) || 0;
     const a = cfg.asesores && cfg.asesores[asesorId];
-    return a && a.metaBase ? Number(a.metaBase) : 0;
+    return a && a[K.base] ? Number(a[K.base]) : 0;
   }
   /** Meta prorrateada por días hábiles cuando el periodo no es un mes completo. */
-  function metaRange(cfg, asesorIds, range) {
+  function metaRange(cfg, asesorIds, range, tipoMeta) {
     let total = 0;
     let cur = U.monthStart(range.from);
     while (cur <= range.to) {
@@ -785,12 +791,13 @@
       const bdR = U.businessDays(a, b, cfg.diasHabiles).length;
       const factor = (a === cur && b === mEnd) ? 1 : bdR / bdM;
       const mk = U.monthKey(cur);
-      asesorIds.forEach((id) => { total += metaMensual(cfg, id, mk) * factor; });
+      asesorIds.forEach((id) => { total += metaMensual(cfg, id, mk, tipoMeta) * factor; });
       const n = U.fromYmd(cur); n.setMonth(n.getMonth() + 1); cur = U.ymd(n);
     }
-    return Math.round(total);
+    return META_KEYS[tipoMeta || 'monto'].redondeo(total);
   }
-  function metaEquipoRange(cfg, activeIds, range) {
+  function metaEquipoRange(cfg, activeIds, range, tipoMeta) {
+    const K = META_KEYS[tipoMeta || 'monto'];
     let total = 0, cur = U.monthStart(range.from);
     while (cur <= range.to) {
       const mEnd = U.monthEnd(cur);
@@ -798,12 +805,12 @@
       const bdM = U.businessDays(cur, mEnd, cfg.diasHabiles).length || 1;
       const factor = (a === cur && b === mEnd) ? 1 : U.businessDays(a, b, cfg.diasHabiles).length / bdM;
       const mk = U.monthKey(cur);
-      const fixed = cfg.metaEquipo && cfg.metaEquipo[mk];
-      const m = fixed ? Number(fixed) : activeIds.reduce((s, id) => s + metaMensual(cfg, id, mk), 0);
+      const fixed = cfg[K.equipo] && cfg[K.equipo][mk];
+      const m = fixed ? Number(fixed) : activeIds.reduce((s, id) => s + metaMensual(cfg, id, mk, tipoMeta), 0);
       total += m * factor;
       const n = U.fromYmd(cur); n.setMonth(n.getMonth() + 1); cur = U.ymd(n);
     }
-    return Math.round(total);
+    return K.redondeo(total);
   }
 
   function progressLevel(p) {
@@ -840,6 +847,10 @@
     const meta = o.asesorIds ? metaRange(cfg, metaIds, range) : metaEquipoRange(cfg, metaIds, range);
     const avance = meta ? (monto / meta) * 100 : null;
     const faltante = Math.max(0, meta - monto);
+    // Meta de número de créditos colocados
+    const metaCreditos = o.asesorIds ? metaRange(cfg, metaIds, range, 'creditos') : metaEquipoRange(cfg, metaIds, range, 'creditos');
+    const avanceCreditos = metaCreditos ? (creditos / metaCreditos) * 100 : null;
+    const faltanteCreditos = Math.max(0, Math.ceil(metaCreditos - creditos));
 
     // --- Funnel
     // registros del Funnel ya contados en un cierre anterior no cuentan en periodos posteriores
@@ -922,7 +933,7 @@
     const ticket = creditos ? monto / creditos : null;
 
     return {
-      range, monto, creditos, ticket, porTipo, montoReal: monto - montoAjuste, montoAjuste, creditosAjuste: ajusteList.length, recuperados, meta, avance, faltante, nivel: progressLevel(avance),
+      range, monto, creditos, ticket, porTipo, metaCreditos, avanceCreditos, faltanteCreditos, nivelCreditos: progressLevel(avanceCreditos), montoReal: monto - montoAjuste, montoAjuste, creditosAjuste: ajusteList.length, recuperados, meta, avance, faltante, nivel: progressLevel(avance),
       pipeline, estado, proyeccion, ritmo, bdTotal, bdTrans,
       contactacion: { asignados, trabajados: trabajados.length, contactados: contactados.length, pct: pctContactacion },
       conversion: trabajados.length ? (creditos / trabajados.length) * 100 : null,

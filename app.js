@@ -254,15 +254,18 @@
     </div>`;
   }
 
+  const fmtC = (x) => (Math.round(x) === x ? String(x) : x.toFixed(1));
   function cCreditos(m) {
     const tipos = ['Nuevo', 'Renovación', 'Nómina'].concat(m.porTipo.Otros.n ? ['Otros'] : []);
     return `<div class="cardx">
       <div class="card-title-x"><span>Créditos colocados</span><span class="tiny">${m.creditosAjuste ? 'incluye ' + m.creditosAjuste + ' de ajuste' : 'Colocación oficial'}</span></div>
       <div class="d-flex align-items-end gap-3">
-        <div><div class="big-num num">${m.creditos}</div><div class="small text-muted">operaciones</div></div>
+        <div><div class="big-num num">${m.creditos}${m.metaCreditos ? `<span class="fs-5 text-muted"> / ${fmtC(m.metaCreditos)}</span>` : ''}</div><div class="small text-muted">${m.metaCreditos ? 'créditos de tu meta' : 'operaciones'}</div></div>
         <div class="ms-auto text-end"><div class="small text-muted">Ticket promedio</div><div class="fw-bold num">${m.ticket ? U.money(m.ticket) : '—'}</div>
         <div class="small text-muted mt-1">Monto total</div><div class="fw-bold num">${U.money(m.monto)}</div></div>
       </div>
+      ${m.metaCreditos ? `<div class="lvl-${m.nivelCreditos.key} mt-3"><div class="pbar"><span style="width:${Math.min(100, m.avanceCreditos || 0)}%"></span></div>
+        <div class="pbar-legend"><span>${U.pct(m.avanceCreditos, 0)} de la meta de créditos</span><span>${m.faltanteCreditos > 0 ? 'Te faltan ' + m.faltanteCreditos + ' crédito' + (m.faltanteCreditos === 1 ? '' : 's') : '¡Meta de créditos cumplida! 🎉'}</span></div></div>` : ''}
       <div class="mini-stats mt-3">${tipos.map((t) => `<div class="mini-stat tipo-${t.toLowerCase()}"><div class="l">${t}</div><div class="v num">${m.porTipo[t].n}</div><div class="s num">${U.moneyK(m.porTipo[t].monto)}</div></div>`).join('')}</div>
     </div>`;
   }
@@ -329,6 +332,9 @@
       <div class="text-end"><div class="small text-muted">Meta</div><div class="fw-bold num">${t.meta ? U.money(t.meta) : '—'}</div></div></div>
       <div class="pbar grad lg mt-2"><span style="width:${w}%"></span></div>
       <div class="pbar-legend"><span>${U.pct(t.avance)} de avance</span><span>Faltante ${U.money(t.faltante)}</span></div>
+      ${t.metaCreditos ? `<div class="d-flex justify-content-between align-items-end mt-3"><div><div class="small text-muted">Créditos del equipo</div><div class="fw-bold fs-4 num">${t.creditos} <span class="fs-6 text-muted">/ ${fmtC(t.metaCreditos)}</span></div></div>
+        <div class="text-end small">${t.faltanteCreditos > 0 ? `Faltan <b>${t.faltanteCreditos}</b> créditos` : '<b class="ok-text">¡Meta de créditos lograda!</b>'}</div></div>
+      <div class="pbar grad mt-1"><span style="width:${Math.min(100, t.avanceCreditos || 0)}%"></span></div>` : ''}
       <div class="team-msg">${msg}</div>
     </div>`;
   }
@@ -576,12 +582,12 @@
    * VISTAS — SUPERVISOR
    * ---------------------------------------------------------------- */
   const COLS = [
-    ['nombre', 'Asesor'], ['meta', 'Meta'], ['monto', 'Colocado'], ['avance', '% Avance'], ['creditos', 'Créditos'], ['ticket', 'Ticket prom.'],
+    ['nombre', 'Asesor'], ['meta', 'Meta'], ['monto', 'Colocado'], ['avance', '% Avance'], ['creditos', 'Créditos'], ['avCred', '% Meta créditos'], ['ticket', 'Ticket prom.'],
     ['contact', 'Contactación'], ['exped', 'Expedientes'], ['mesa', 'Mesa'], ['aut', 'Autorizados'], ['proy', 'Proyección'], ['puntos', 'Puntos'],
   ];
   function adminRows() {
     return G.teamRows(S.ds, S.cfg, range(), S.today, S.tipo).map((r) => ({
-      id: r.id, nombre: r.nombre, m: r.m, meta: r.m.meta, monto: r.m.monto, avance: r.m.avance || 0, creditos: r.m.creditos, ticket: r.m.ticket || 0,
+      id: r.id, nombre: r.nombre, m: r.m, meta: r.m.meta, monto: r.m.monto, avance: r.m.avance || 0, creditos: r.m.creditos, avCred: r.m.avanceCreditos || 0, ticket: r.m.ticket || 0,
       contact: r.m.contactacion.pct || 0, exped: r.m.pipeline[2].n, mesa: r.m.estado.mesa, aut: r.m.estado.autorizados + r.m.estado.porDispersar, proy: r.m.proyeccion.potencial, puntos: r.puntos,
     }));
   }
@@ -615,7 +621,7 @@
         <tbody>${rows.map((r) => `<tr data-asesor="${esc(r.id)}">
           <td class="fw-bold">${esc(r.nombre)}</td><td class="num">${r.meta ? U.moneyK(r.meta) : '<span class="text-muted">sin meta</span>'}</td><td class="num fw-bold">${U.money(r.monto)}</td>
           <td class="num lvl-${D.progressLevel(r.m.avance).key}">${U.pct(r.m.avance, 0)}<span class="pbar sm mini-bar"><span style="width:${Math.min(100, r.avance)}%"></span></span></td>
-          <td class="num">${r.creditos}</td><td class="num">${r.ticket ? U.moneyK(r.ticket) : '—'}</td><td class="num">${U.pct(r.m.contactacion.pct, 0)}</td>
+          <td class="num">${r.creditos}${r.m.metaCreditos ? ' <span class="text-muted">/ ' + fmtC(r.m.metaCreditos) + '</span>' : ''}</td><td class="num lvl-${r.m.nivelCreditos.key}">${r.m.metaCreditos ? U.pct(r.m.avanceCreditos, 0) + `<span class="pbar sm mini-bar"><span style="width:${Math.min(100, r.avCred)}%"></span></span>` : '<span class="text-muted">sin meta</span>'}</td><td class="num">${r.ticket ? U.moneyK(r.ticket) : '—'}</td><td class="num">${U.pct(r.m.contactacion.pct, 0)}</td>
           <td class="num">${r.exped}</td><td class="num">${r.mesa}</td><td class="num">${r.aut}</td><td class="num">${U.moneyK(r.proy)}</td><td class="num">${U.int(r.puntos)}</td></tr>`).join('')}</tbody></table></div>
         <div class="tiny text-muted mt-2">Expedientes = alcanzados en el periodo. Mesa / Autorizados (incluye por dispersar) = cartera abierta hoy. Proyección = real + en camino.</div>
       </div>
@@ -937,17 +943,22 @@
     const mk = S.cfgMonth || U.monthKey(S.today);
     const allIds = Object.keys(S.cfg.asesores).sort((a, b) => name(a).localeCompare(name(b)));
     const me = (S.cfg.metas[mk] || {});
+    S.cfg.metasCreditos = S.cfg.metasCreditos || {}; S.cfg.metaEquipoCreditos = S.cfg.metaEquipoCreditos || {};
+    const mc = (S.cfg.metasCreditos[mk] || {});
     return `<div class="cardx"><div class="card-title-x"><span>Metas mensuales</span><input type="month" id="cfgMonth" class="form-control form-control-sm" style="max-width:170px" value="${mk}"></div>
       <div class="small text-muted mb-2">La meta del mes sustituye a la meta base. Deja vacío para usar la meta base. Para periodos parciales (hoy, semana) se prorratea por días hábiles.</div>
-      <div class="table-responsive"><table class="table table-sm align-middle small"><thead><tr><th>Asesor</th><th>Meta ${esc(U.monthName(mk + '-01'))}</th><th>Meta base</th><th>Activo</th><th>Unir con (duplicado)</th></tr></thead><tbody>
+      <div class="table-responsive"><table class="table table-sm align-middle small"><thead><tr><th>Asesor</th><th>Meta $ ${esc(U.monthName(mk + '-01'))}</th><th>Meta $ base</th><th>Meta créditos ${esc(U.monthName(mk + '-01').split(' ')[0])}</th><th>Meta créditos base</th><th>Activo</th><th>Unir con (duplicado)</th></tr></thead><tbody>
       ${allIds.map((id) => { const a = S.cfg.asesores[id]; return `<tr><td><input class="form-control form-control-sm" data-an="${esc(id)}" value="${esc(a.nombre)}"></td>
         <td><input type="number" min="0" step="1000" class="form-control form-control-sm" data-mm="${esc(id)}" value="${me[id] != null ? esc(me[id]) : ''}" placeholder="${esc(a.metaBase || 0)}"></td>
         <td><input type="number" min="0" step="1000" class="form-control form-control-sm" data-mb="${esc(id)}" value="${esc(a.metaBase || 0)}"></td>
+        <td><input type="number" min="0" step="1" class="form-control form-control-sm" style="min-width:80px" data-mcm="${esc(id)}" value="${mc[id] != null ? esc(mc[id]) : ''}" placeholder="${esc(a.metaCreditosBase || 0)}"></td>
+        <td><input type="number" min="0" step="1" class="form-control form-control-sm" style="min-width:80px" data-mcb="${esc(id)}" value="${esc(a.metaCreditosBase || 0)}"></td>
         <td><input type="checkbox" class="form-check-input" data-aa="${esc(id)}" ${a.activo !== false ? 'checked' : ''}></td>
         <td><select class="form-select form-select-sm" data-alias="${esc(id)}"><option value="">—</option>${allIds.filter((x) => x !== id).map((x) => `<option value="${esc(x)}">${esc(name(x))}</option>`).join('')}</select></td></tr>`; }).join('') || '<tr><td colspan="5" class="text-muted">Los asesores se registran automáticamente al cargar el Funnel o la colocación oficial.</td></tr>'}
       </tbody></table></div>
       <div class="row g-2 align-items-end"><div class="col-12 col-md-5"><label class="form-label small">Meta del equipo ${esc(U.monthName(mk + '-01'))} (vacío = suma de metas individuales activas)</label><input type="number" min="0" step="10000" class="form-control" id="metaEquipo" value="${esc(S.cfg.metaEquipo[mk] || '')}"></div>
-      <div class="col-12 col-md-7"><button class="btn btn-binco" data-act="saveMetas">Guardar metas</button></div></div></div>`;
+      <div class="col-12 col-md-4"><label class="form-label small">Meta de créditos del equipo ${esc(U.monthName(mk + '-01'))} (vacío = suma)</label><input type="number" min="0" step="1" class="form-control" id="metaEquipoCreditos" value="${esc(S.cfg.metaEquipoCreditos[mk] || '')}"></div>
+      <div class="col-12 col-md-3"><button class="btn btn-binco w-100" data-act="saveMetas">Guardar metas</button></div></div></div>`;
   };
   CFG.puntos = () => {
     const p = S.cfg.puntos, l = S.cfg.logros;
@@ -1346,6 +1357,11 @@
         $$('[data-aa]').forEach((i) => { S.cfg.asesores[i.dataset.aa].activo = i.checked; });
         $$('[data-an]').forEach((i) => { if (i.value.trim()) S.cfg.asesores[i.dataset.an].nombre = i.value.trim(); });
         const me = $('#metaEquipo').value.trim(); if (me) S.cfg.metaEquipo[mk] = Number(me); else delete S.cfg.metaEquipo[mk];
+        S.cfg.metasCreditos = S.cfg.metasCreditos || {}; S.cfg.metaEquipoCreditos = S.cfg.metaEquipoCreditos || {};
+        S.cfg.metasCreditos[mk] = S.cfg.metasCreditos[mk] || {};
+        $$('[data-mcm]').forEach((i) => { const v = i.value.trim(); if (v === '') delete S.cfg.metasCreditos[mk][i.dataset.mcm]; else S.cfg.metasCreditos[mk][i.dataset.mcm] = Math.max(0, Number(v)); });
+        $$('[data-mcb]').forEach((i) => { S.cfg.asesores[i.dataset.mcb].metaCreditosBase = Math.max(0, Number(i.value) || 0); });
+        const mce = $('#metaEquipoCreditos').value.trim(); if (mce) S.cfg.metaEquipoCreditos[mk] = Number(mce); else delete S.cfg.metaEquipoCreditos[mk];
         let merged = 0;
         $$('[data-alias]').forEach((s) => { if (s.value) { S.cfg.asesorAlias[s.dataset.alias] = s.value; delete S.cfg.asesores[s.dataset.alias]; merged++; } });
         saveCfg(); rebuild(); render(); toast(merged ? `Metas guardadas y ${merged} asesor(es) unificados.` : 'Metas guardadas.'); return;

@@ -36,6 +36,8 @@
       asesorAlias: {},                      // id duplicado → id principal
       metas: {},                            // 'YYYY-MM' → {asesorId: meta}
       metaEquipo: {},                       // 'YYYY-MM' → meta fija del equipo (vacío = suma de metas individuales)
+      metasCreditos: {},                    // 'YYYY-MM' → {asesorId: meta de créditos}
+      metaEquipoCreditos: {},               // 'YYYY-MM' → meta de créditos del equipo (vacío = suma)
       stageMap: {},                         // texto de estatus normalizado → etapa canónica
       cierres: [],                          // ajustes de cierre de mes (operaciones atribuidas a un mes para bono)
       mappings: { funnel: {}, icarus: {} }, // encabezado normalizado → campo canónico
