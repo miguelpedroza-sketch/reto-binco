@@ -242,7 +242,7 @@
       ${m.nivel.key === 'meta' ? '<span class="confetti">🎉</span>' : ''}
       <div class="card-title-x"><span>Colocación ${periodTitle()}</span>${m.meta ? `<span class="level-badge">${LVL_EMOJI[m.nivel.key]} ${m.nivel.label}</span>` : ''}</div>
       <div class="kpi-amount num">${U.money(m.monto)}</div>
-      <div class="tiny text-muted mt-1">${m.montoAjuste ? `Real ${U.money(m.montoReal)} + ajuste de cierre ${U.money(m.montoAjuste)} (${m.creditosAjuste} op.)` : 'Confirmado en colocación oficial'}</div>
+      <div class="tiny text-muted mt-1">${m.montoAjuste ? `Real ${U.money(m.montoReal)} + ajuste de cierre ${U.money(m.montoAjuste)} (${m.creditosAjuste} op.)` : (S.ds.fuenteColocacion === 'funnel' ? 'Créditos colocados según el Funnel' : 'Confirmado en colocación oficial')}</div>
       <div class="pbar lg mt-3" role="progressbar" aria-valuenow="${w}" aria-valuemin="0" aria-valuemax="100"><span style="width:${w}%"></span>${marker}</div>
       <div class="pbar-legend"><span>${m.meta ? U.pct(av) + ' de avance' : 'Meta no configurada'}</span><span>${m.meta ? 'Meta ' + U.moneyK(m.meta) : ''}</span></div>
       <div class="kpi-sub">
@@ -640,7 +640,7 @@
       <div class="cardx mt-3"><div class="card-title-x"><span>Evolución semanal (últimas 8 semanas)</span></div><div style="height:200px;position:relative"><canvas id="chWeek"></canvas></div></div>
       <div class="cardx mt-3"><div class="card-title-x"><span>Operaciones colocadas ${periodTitle()} (colocación oficial)</span><span>${ops.length}</span></div>
         <div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>Fecha</th><th>Contrato</th><th>Cliente</th><th>Tipo</th><th class="text-end">Monto</th><th>Cruce</th></tr></thead>
-        <tbody>${ops.map((c) => `<tr><td>${U.fmtDateShort(c.fecha)}</td><td>${esc(c.contrato)}</td><td>${esc(U.shortName(c.nombre))}</td><td>${esc(c.tipo)}</td><td class="text-end num">${U.money(c.monto)}</td><td class="tiny">${c.ajuste ? `<span class="stage-pill st-concluido">Ajuste cierre · ${esc(c.ajusteFuente || '')}</span>` : c.matchVia ? { clienteId: 'ID cliente', contrato: 'Contrato', telHash: 'Teléfono', curpHash: 'CURP', nombreNorm: 'Nombre' }[c.matchVia] : '<span class="warn-text">sin Funnel</span>'}</td></tr>`).join('') || '<tr><td colspan="6" class="text-muted">Sin colocaciones en el periodo.</td></tr>'}</tbody></table></div></div>
+        <tbody>${ops.map((c) => `<tr><td>${U.fmtDateShort(c.fecha)}</td><td>${esc(c.contrato)}</td><td>${esc(U.shortName(c.nombre))}</td><td>${esc(c.tipo)}</td><td class="text-end num">${U.money(c.monto)}</td><td class="tiny">${c.ajuste ? `<span class="stage-pill st-concluido">Ajuste cierre · ${esc(c.ajusteFuente || '')}</span>` : c.matchVia ? { clienteId: 'ID cliente', contrato: 'Contrato', telHash: 'Teléfono', curpHash: 'CURP', nombreNorm: 'Nombre', funnel: 'Funnel' + (c.fechaEstimada ? ' (fecha últ. gestión)' : '') }[c.matchVia] : '<span class="warn-text">sin Funnel</span>'}</td></tr>`).join('') || '<tr><td colspan="6" class="text-muted">Sin colocaciones en el periodo.</td></tr>'}</tbody></table></div></div>
       <div class="grid g2 mt-3"><div class="cardx"><div class="card-title-x"><span>Retos</span></div>${retos.map((e) => cReto(e, { noPrize: true })).join('') || '<div class="small text-muted">Sin retos en el periodo.</div>'}</div>
       <div class="cardx"><div class="card-title-x"><span>Premios ganados</span></div>${ganados.map((e) => `<div class="reto-prize"><span class="emo">${esc(e.premio.emoji)}</span><div><div class="t">${esc(e.reto.nombre)}</div><div class="n">${esc(e.premio.nombre)}</div></div></div>`).join('') || '<div class="small text-muted">Aún sin premios en este periodo.</div>'}
       <div class="mt-3">${cPuntos(id)}</div></div></div>
@@ -974,6 +974,8 @@
   CFG.reglas = () => {
     const c = S.cfg; const dias = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
     return `<div class="cardx"><div class="card-title-x"><span>Reglas de cálculo y visualización</span></div><div class="row g-3">
+      <div class="col-12 col-md-6"><label class="form-label small">Fuente de la colocación (monto y créditos colocados)</label><select class="form-select" id="fuenteCol">${[['auto', 'Automático: Funnel mientras no haya reporte oficial'], ['funnel', 'Funnel (créditos con estatus Colocado)'], ['oficial', 'Reporte oficial (ICARUS o sistema nuevo)']].map(([k, l]) => `<option value="${k}" ${(c.fuenteColocacion || 'auto') === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <div class="tiny text-muted mt-1">Con "Funnel", la fecha de colocación es la columna "Fecha de colocación / dispersión" si el reporte la trae; si no, la fecha de última gestión.</div></div>
       <div class="col-6 col-md-3"><label class="form-label small">% de autorizados en proyección</label><input type="number" min="0" max="100" class="form-control" id="fAut" value="${Math.round(c.factorAutorizado * 100)}"></div>
       <div class="col-6 col-md-3"><label class="form-label small">% de Mesa en proyección</label><input type="number" min="0" max="100" class="form-control" id="fMesa" value="${Math.round(c.factorMesa * 100)}"></div>
       <div class="col-12 col-md-6"><label class="form-label small d-block">Días hábiles (ritmo y prorrateo de metas)</label>${dias.map((d, i) => `<div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" data-dia="${i}" id="d${i}" ${c.diasHabiles.includes(i) ? 'checked' : ''}><label class="form-check-label small" for="d${i}">${d}</label></div>`).join('')}</div>
@@ -1198,7 +1200,7 @@
     const anonF = S.ds.funnel.map((f) => ({ key: H(f.key), asesorId: f.asesorId, asesorNombre: f.asesorNombre, tipo: f.tipo, recuperado: f.recuperado, etapa: f.etapa, etapaEf: f.etapaEf, etapaRaw: f.etapaRaw, monto: f.monto, fAsig: f.fAsig, fUlt: f.fUlt, fContacto: f.fContacto, contactado: f.contactado, gestiones: f.gestiones, fExp: f.fExp, fMesa: f.fMesa, fAut: f.fAut, historial: f.historial, cierrePeriodo: f.cierrePeriodo || null, cierreHasta: f.cierreHasta || null, pendienteValidar: f.pendienteValidar, contratos: f.contratos.map(H), nombre: '', proximaAccion: '' }));
     const anonC = S.ds.colocaciones.map((c) => ({ contrato: H(c.contrato), funnelKey: c.funnelKey ? H(c.funnelKey) : null, asesorId: c.asesorId, asesorNombre: c.asesorNombre, tipo: c.tipo, recuperado: c.recuperado, monto: c.monto, fecha: c.fecha, nombre: '', ajuste: !!c.ajuste, ajusteFuente: c.ajuste ? c.ajusteFuente : undefined }));
     const strip = (f) => Object.assign({}, f, { telHash: '', curpHash: '' });
-    const team = { cfg: publicCfg(), meta: S.raw.meta, generado: new Date().toISOString(), funnel: anonF, colocaciones: anonC, matchStats: S.ds.matchStats };
+    const team = { cfg: publicCfg(), meta: S.raw.meta, fuenteColocacion: S.ds.fuenteColocacion, generado: new Date().toISOString(), funnel: anonF, colocaciones: anonC, matchStats: S.ds.matchStats };
     const pub = { formato: 'binco-reto-publicacion', version: 1, generado: team.generado, equipo: await encrypt(S.cfg.teamKey, team), asesores: {} };
     for (const id of activeIds()) {
       const tok = S.cfg.asesores[id].token;
@@ -1242,7 +1244,7 @@
       const funnel = team.funnel.filter((f) => f.asesorId !== mine.asesorId).concat(mine.funnel);
       const coloc = team.colocaciones.filter((c) => c.asesorId !== mine.asesorId).concat(mine.colocaciones);
       const asesores = new Map(Object.keys(S.cfg.asesores).map((id) => [id, S.cfg.asesores[id].nombre]));
-      S.ds = { funnel, colocaciones: coloc, asesores, matchStats: team.matchStats };
+      S.ds = { funnel, colocaciones: coloc, asesores, matchStats: team.matchStats, fuenteColocacion: team.fuenteColocacion };
       S.publication = true;
       S.session = { role: 'asesor', asesorId: mine.asesorId };
       keySet(token); salioSet(false); // recordar el enlace en este dispositivo
@@ -1376,6 +1378,7 @@
         if (!dias.length) return toast('Selecciona al menos un día hábil.');
         Object.assign(S.cfg, { factorAutorizado: Math.min(100, Math.max(0, Number($('#fAut').value))) / 100, factorMesa: Math.min(100, Math.max(0, Number($('#fMesa').value))) / 100, diasHabiles: dias, rankingCriterio: $('#rkCrit').value, reconocimientoModo: $('#recMode').value, mensajes: $('#msgs').value.split('\n').map((x) => x.trim()).filter(Boolean) });
         S.cfg.privacidad.mostrarRankingMontos = $('#rkMoney').checked;
+        S.cfg.fuenteColocacion = $('#fuenteCol').value; rebuild();
         saveCfg(); toast('Reglas guardadas.'); return;
       }
       case 'savePin': { const p = $('#newPin').value; if (p.length < 6) return toast('El PIN debe tener al menos 6 caracteres.'); S.cfg.adminPin = p; saveCfg(); $('#newPin').value = ''; toast('PIN actualizado.'); return; }

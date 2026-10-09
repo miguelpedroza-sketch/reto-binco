@@ -231,6 +231,7 @@
       { key: 'gestiones', label: 'Número de gestiones', syn: ['gestiones', 'numero gestiones', 'no gestiones', 'intentos', 'llamadas', 'actividades', 'numero de gestiones', 'total gestiones'] },
       { key: 'fechaExpediente', label: 'Fecha expediente', syn: ['fecha expediente', 'fecha documentacion', 'fecha de expediente'] },
       { key: 'fechaMesa', label: 'Fecha envío a Mesa', syn: ['fecha mesa', 'fecha envio mesa', 'fecha mesa control', 'fecha envio a mesa', 'fecha mesa de control'] },
+      { key: 'fechaColocacion', label: 'Fecha de colocación / dispersión', syn: ['fecha colocacion', 'fecha de colocacion', 'fecha dispersion', 'fecha de dispersion', 'fecha desembolso', 'fecha colocado', 'fecha de credito'] },
       { key: 'fechaAutorizacion', label: 'Fecha autorización', syn: ['fecha autorizacion', 'fecha aprobacion', 'fecha autorizado', 'fecha de autorizacion'] },
       { key: 'proximaAccion', label: 'Próxima acción', syn: ['proxima accion', 'siguiente paso', 'siguiente accion', 'tarea', 'proximo paso', 'accion siguiente'] },
       { key: 'recuperado', label: 'Cliente recuperado', syn: ['recuperado', 'cliente recuperado', 'reactivado'] },
@@ -346,6 +347,7 @@
       fExp: U.parseDate(g('fechaExpediente')),
       fMesa: U.parseDate(g('fechaMesa')),
       fAut: U.parseDate(g('fechaAutorizacion')),
+      fColoc: U.parseDate(g('fechaColocacion')),
       proximaAccion: String(g('proximaAccion') || '').trim().slice(0, 140),
     };
     if (!rec.fAsig) rec.fAsig = rec.fUlt || rec.fContacto;
@@ -470,7 +472,7 @@
           primeraCarga: prev.primeraCarga,
           fAsig: prev.fAsig || r.fAsig,
           fContacto: r.fContacto || prev.fContacto,
-          fExp: r.fExp || prev.fExp, fMesa: r.fMesa || prev.fMesa, fAut: r.fAut || prev.fAut,
+          fExp: r.fExp || prev.fExp, fMesa: r.fMesa || prev.fMesa, fAut: r.fAut || prev.fAut, fColoc: r.fColoc || prev.fColoc,
           monto: r.monto || prev.monto,
         });
         map.set(r.key, merged); actualizados++;
@@ -565,6 +567,23 @@
       return Object.assign({}, f, { etapaEf, pendienteValidar, contratos: confirmados });
     });
 
+    // Fuente de colocación: 'oficial' (reporte ICARUS/sistema nuevo), 'funnel' (créditos "Colocado" del Funnel)
+    // o 'auto' (usa el Funnel mientras no haya reporte oficial cargado; si hay reporte oficial, manda el oficial).
+    const fuente = cfg.fuenteColocacion || 'auto';
+    const usarFunnel = fuente === 'funnel' || (fuente === 'auto' && !icarus.length);
+    if (usarFunnel) {
+      funnelEff.forEach((f) => {
+        if (!f.pendienteValidar) return;
+        const contrato = f.contrato || ('FN-' + U.hash(f.key).slice(0, 12));
+        colocaciones.push({
+          contrato, fecha: f.fColoc || f.fUlt || f.fAut || f.fAsig, monto: f.monto || 0, asesorId: f.asesorId, asesorNombre: f.asesorNombre,
+          tipo: f.tipo, recuperado: f.recuperado, nombre: f.nombre, nombreNorm: f.nombreNorm, clienteId: f.clienteId,
+          funnelKey: f.key, matchVia: 'funnel', fuenteFunnel: true, fechaEstimada: !f.fColoc,
+        });
+        f.etapaEf = 'colocado'; f.pendienteValidar = false; f.contratos = [contrato];
+      });
+    }
+
     // Ajustes de cierre de mes (ej. operaciones tomadas para el bono de septiembre)
     const aj = applyCierres(cfg, reAlias, funnelEff, colocaciones);
     colocaciones = aj.colocaciones;
@@ -581,6 +600,7 @@
 
     return {
       funnel: funnelEff, colocaciones, asesores, ajustes: aj.ajustes, reemplazadas: aj.reemplazadas,
+      fuenteColocacion: usarFunnel ? 'funnel' : 'oficial',
       matchStats: Object.assign({}, m.stats, { coincidencias: m.links.size, pendientes, clientesUnicos: clientesUnicos.size, canceladosExcluidos: icarus.length - colocaciones.length }),
     };
   }
