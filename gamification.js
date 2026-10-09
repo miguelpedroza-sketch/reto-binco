@@ -39,6 +39,7 @@
       metasCreditos: {},                    // 'YYYY-MM' → {asesorId: meta de créditos}
       metaEquipoCreditos: {},               // 'YYYY-MM' → meta de créditos del equipo (vacío = suma)
       stageMap: {},                         // texto de estatus normalizado → etapa canónica
+      fuenteColocacion: 'funnel',           // 'funnel' (fijo) | 'oficial' (reporte ICARUS/sistema nuevo)
       cierres: [],                          // ajustes de cierre de mes (operaciones atribuidas a un mes para bono)
       mappings: { funnel: {}, icarus: {} }, // encabezado normalizado → campo canónico
       api: { funnelUrl: '', icarusUrl: '', token: '', activo: false },

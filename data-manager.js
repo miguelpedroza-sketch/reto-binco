@@ -569,8 +569,8 @@
 
     // Fuente de colocación: 'oficial' (reporte ICARUS/sistema nuevo), 'funnel' (créditos "Colocado" del Funnel)
     // o 'auto' (usa el Funnel mientras no haya reporte oficial cargado; si hay reporte oficial, manda el oficial).
-    const fuente = cfg.fuenteColocacion || 'auto';
-    const usarFunnel = fuente === 'funnel' || (fuente === 'auto' && !icarus.length);
+    // BINCO dejó de usar ICARUS: la fuente fija es el Funnel, salvo que se elija explícitamente "oficial".
+    const usarFunnel = cfg.fuenteColocacion !== 'oficial';
     if (usarFunnel) {
       funnelEff.forEach((f) => {
         if (!f.pendienteValidar) return;
