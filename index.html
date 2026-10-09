@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="es-MX">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1E5BD8">
+  <meta name="robots" content="noindex, nofollow">
+  <title>BINCO | Reto Comercial</title>
+  <!-- App instalable (PC y celular) cuando se publica en un servidor https -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Reto BINCO">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <!-- Librerías locales (funciona sin internet). Ver README para CDN alternativo. -->
+  <link rel="stylesheet" href="bootstrap.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- =========================== ACCESO =========================== -->
+  <section id="login" class="login-screen d-none" aria-label="Acceso">
+    <div class="login-card">
+      <div class="brand-mark mb-3"><span class="brand-dot"></span>BINCO <span class="brand-sub">| Reto Comercial</span></div>
+      <h1 class="h4 fw-bold mb-1">¡Hola! ¿Quién eres?</h1>
+      <p class="text-muted small mb-4">Consulta tu avance, tus retos y lo que tienes cerca de cerrar.</p>
+
+      <div id="loginAsesorBox">
+        <label class="form-label small fw-semibold" for="loginAsesor">Soy asesor</label>
+        <select id="loginAsesor" class="form-select form-select-lg mb-2"></select>
+        <input id="loginAsesorPin" type="password" inputmode="numeric" class="form-control mb-3 d-none" placeholder="PIN personal" autocomplete="off">
+        <button id="btnLoginAsesor" class="btn btn-binco btn-lg w-100 mb-3">Ver mi avance</button>
+      </div>
+
+      <div class="divider"><span>o</span></div>
+
+      <button class="btn btn-outline-binco w-100" data-bs-toggle="collapse" data-bs-target="#adminLoginBox">Soy supervisor / gerente</button>
+      <div id="adminLoginBox" class="collapse mt-3">
+        <input id="loginAdminPin" type="password" class="form-control mb-2" placeholder="PIN de administrador" autocomplete="off">
+        <button id="btnLoginAdmin" class="btn btn-dark w-100">Entrar como administrador</button>
+      </div>
+      <div id="loginMsg" class="small text-center mt-3"></div>
+      <p class="tiny text-muted text-center mt-4 mb-0">Herramienta de visibilidad y reconocimiento. Los puntos BINCO no sustituyen los KPIs oficiales.</p>
+    </div>
+  </section>
+
+  <!-- =========================== APP =========================== -->
+  <div id="app" class="d-none">
+    <header class="app-header">
+      <div class="container-xl">
+        <div class="d-flex align-items-center justify-content-between gap-2 py-2">
+          <div class="brand-mark"><span class="brand-dot"></span>BINCO <span class="brand-sub d-none d-sm-inline">| Reto Comercial</span></div>
+          <nav id="topNav" class="top-nav d-none d-lg-flex" aria-label="Secciones"></nav>
+          <div class="d-flex align-items-center gap-2">
+            <select id="viewAs" class="form-select form-select-sm d-none" aria-label="Ver como asesor" style="max-width:190px"></select>
+            <button id="btnInstall" class="btn btn-sm btn-soft d-none" title="Instalar como app">📲 Instalar</button>
+            <button id="btnLogout" class="btn btn-sm btn-light" title="Salir">Salir</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="container-xl pb-nav">
+      <!-- Saludo + periodo + actualización -->
+      <section class="hello mt-3">
+        <div class="d-flex flex-wrap align-items-end justify-content-between gap-2">
+          <div>
+            <div id="helloName" class="hello-name"></div>
+            <div id="helloMsg" class="hello-msg"></div>
+          </div>
+          <div id="updateStamp" class="update-stamp"></div>
+        </div>
+
+        <!-- Filtros -->
+        <div class="filters mt-3">
+          <div class="chip-group" id="periodChips" role="group" aria-label="Periodo">
+            <button class="chip" data-p="hoy">Hoy</button>
+            <button class="chip" data-p="semana">Esta semana</button>
+            <button class="chip active" data-p="mes">Mes actual</button>
+            <button class="chip" data-p="mesAnt">Mes anterior</button>
+            <button class="chip" data-p="custom">Personalizado</button>
+          </div>
+          <div id="customRange" class="custom-range d-none">
+            <input type="date" id="fFrom" class="form-control form-control-sm" aria-label="Desde">
+            <span class="text-muted small">a</span>
+            <input type="date" id="fTo" class="form-control form-control-sm" aria-label="Hasta">
+          </div>
+          <select id="fTipo" class="form-select form-select-sm filter-select" aria-label="Tipo de crédito">
+            <option value="Todos">Todos los tipos</option>
+            <option>Nuevo</option><option>Renovación</option><option>Nómina</option><option>Otros</option>
+          </select>
+        </div>
+        <div id="periodLabel" class="period-label"></div>
+      </section>
+
+      <div id="view" class="mt-3" aria-live="polite"></div>
+    </main>
+
+    <nav id="bottomNav" class="bottom-nav d-lg-none" aria-label="Secciones"></nav>
+  </div>
+
+  <!-- Modal genérico -->
+  <div class="modal fade" id="modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable modal-fullscreen-sm-down modal-lg">
+      <div class="modal-content">
+        <div class="modal-header"><h2 class="modal-title h5" id="modalTitle"></h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button></div>
+        <div class="modal-body" id="modalBody"></div>
+        <div class="modal-footer d-none" id="modalFooter"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index:2000"><div id="toast" class="toast align-items-center border-0" role="status"><div class="d-flex"><div class="toast-body" id="toastBody"></div><button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast" aria-label="Cerrar"></button></div></div></div>
+
+  <script src="bootstrap.bundle.min.js"></script>
+  <script src="chart.umd.js"></script>
+  <script src="xlsx.full.min.js"></script>
+  <script src="data-manager.js"></script>
+  <script src="gamification.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
