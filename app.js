@@ -242,6 +242,7 @@
       ${m.nivel.key === 'meta' ? '<span class="confetti">🎉</span>' : ''}
       <div class="card-title-x"><span>Colocación ${periodTitle()}</span>${m.meta ? `<span class="level-badge">${LVL_EMOJI[m.nivel.key]} ${m.nivel.label}</span>` : ''}</div>
       <div class="kpi-amount num">${U.money(m.monto)}</div>
+      ${m.montoAplicado || m.creditosAplicados ? `<div class="small mt-1" style="color:var(--b-morado)">Colocaste ${U.money(m.montoBruto)} (${m.creditosBrutos} créd.) · <b>${U.money(m.montoAplicado)} (${m.creditosAplicados} créd.) cubren el saldo del cierre anterior</b> · cuentan para tu meta ${U.money(m.monto)}</div>` : ''}
       <div class="tiny text-muted mt-1">${m.montoAjuste ? `Real ${U.money(m.montoReal)} + ajuste de cierre ${U.money(m.montoAjuste)} (${m.creditosAjuste} op.)` : (S.ds.fuenteColocacion === 'funnel' ? 'Créditos colocados según el Funnel' : 'Confirmado en colocación oficial')}</div>
       <div class="pbar lg mt-3" role="progressbar" aria-valuenow="${w}" aria-valuemin="0" aria-valuemax="100"><span style="width:${w}%"></span>${marker}</div>
       <div class="pbar-legend"><span>${m.meta ? U.pct(av) + ' de avance' : 'Meta no configurada'}</span><span>${m.meta ? 'Meta ' + U.moneyK(m.meta) : ''}</span></div>
@@ -255,6 +256,43 @@
   }
 
   const fmtC = (x) => (Math.round(x) === x ? String(x) : x.toFixed(1));
+  function cSaldoEquipo() {
+    const sal = Object.values((S.ds && S.ds.saldos) || {});
+    if (!sal.length || !cSaldo(null)) return '';
+    return `<div class="grid g2 mt-3">${cSaldo(null)}<div class="cardx"><div class="card-title-x"><span>Saldo por asesor</span></div>
+      <div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>Asesor</th><th class="text-end">Saldo inicial</th><th class="text-end">Cubierto</th><th class="text-end">Falta</th><th class="text-end">Contratos por cubrir</th></tr></thead><tbody>
+      ${sal.map((o) => `<tr><td class="fw-bold">${esc(name(o.asesorId))}</td><td class="text-end num">${U.money(o.inicialMonto)}</td><td class="text-end num">${U.money(o.aplicadoMonto)}</td><td class="text-end num fw-bold">${U.money(o.pendienteMonto)}</td><td class="text-end num">${o.pendienteCred} de ${o.inicialCred}</td></tr>`).join('')}
+      </tbody></table></div></div></div>`;
+  }
+
+  /** Saldo pendiente del cierre anterior (solo en el mes de saldo). */
+  function cSaldo(ids) {
+    const sal = Object.values((S.ds && S.ds.saldos) || {}).filter((o) => !ids || ids.includes(o.asesorId));
+    if (!sal.length) return '';
+    const mesSaldo = sal[0].mesSaldo; const r = range();
+    if (!(r.from <= U.monthEnd(mesSaldo + '-01') && r.to >= mesSaldo + '-01')) return '';
+    const tot = (k) => sal.reduce((a, o) => a + (o[k] || 0), 0);
+    const ini = tot('inicialMonto'), apl = tot('aplicadoMonto'), pen = tot('pendienteMonto');
+    const iniC = tot('inicialCred'), aplC = tot('aplicadoCred'), penC = tot('pendienteCred');
+    if (!ini && !iniC) return '';
+    const vencido = S.today > U.monthEnd(mesSaldo + '-01');
+    const pct = ini ? Math.min(100, (ini - pen) / ini * 100) : 100;
+    const items = sal.flatMap((o) => o.items.map((it) => Object.assign({ asesor: o.asesorNombre }, it)));
+    const cubierto = pen <= 0 && penC <= 0;
+    return `<div class="cardx" style="border:1.5px solid ${cubierto ? '#BDE9EA' : '#E7D6F7'}">
+      <div class="card-title-x"><span>Saldo del ${esc(sal[0].cierre || 'cierre anterior')}</span><span class="tiny">${vencido ? 'plazo vencido' : 'cubrir antes del ' + U.fmtDate(U.monthEnd(mesSaldo + '-01'))}</span></div>
+      ${cubierto ? '<div class="fw-bold ok-text">✅ Saldo cubierto. Toda tu colocación cuenta para la meta del mes.</div>' : `
+      <div class="d-flex justify-content-between align-items-end"><div><div class="small text-muted">Falta por cubrir</div><div class="fs-3 fw-bold num" style="color:var(--b-morado)">${U.money(pen)}</div></div>
+      <div class="text-end"><div class="small text-muted">Contratos por cubrir</div><div class="fs-3 fw-bold num">${penC}</div></div></div>`}
+      <div class="pbar mt-2"><span style="width:${pct}%;background:var(--b-morado)"></span></div>
+      <div class="pbar-legend"><span>Saldo inicial ${U.money(ini)} · ${iniC} contratos</span><span>Cubierto con colocación de ${esc(U.monthName(mesSaldo + '-01').split(' ')[0])}: ${U.money(apl)} · ${aplC}</span></div>
+      <details class="small mt-2"><summary>Qué quedó pendiente del cierre (${items.length})</summary>
+        ${items.map((it) => `<div class="d-flex justify-content-between gap-2 border-bottom py-1"><span>${esc(it.cliente)}${ids && ids.length === 1 ? '' : ' <span class="text-muted">· ' + esc(prettyName(it.asesor || '')) + '</span>'}<br><span class="tiny text-muted">${esc(it.motivo)}</span></span><span class="num text-end">${U.money(it.monto)}${it.cred ? '<br><span class="tiny text-muted">1 contrato</span>' : ''}</span></div>`).join('')}
+      </details>
+      <div class="tiny text-muted mt-2">Si el cliente pendiente se autoriza, el saldo baja solo. Mientras tanto, tu colocación de ${esc(U.monthName(mesSaldo + '-01').split(' ')[0])} con otros clientes cubre primero este saldo y el excedente cuenta para tu meta.</div>
+    </div>`;
+  }
+
   function cCreditos(m) {
     const tipos = ['Nuevo', 'Renovación', 'Nómina'].concat(m.porTipo.Otros.n ? ['Otros'] : []);
     return `<div class="cardx">
@@ -545,6 +583,7 @@
       const id = currentAsesor(); const m = compute([id]);
       return `<div class="grid home">
         ${cKpi(m)}
+        ${cSaldo([id])}
         ${cCreditos(m)}
         ${cRetoSemanal(id)}
         <div class="span2">${cPipeline(m, true)}</div>
@@ -629,6 +668,7 @@
           <td class="num">${r.exped}</td><td class="num">${r.mesa}</td><td class="num">${r.aut}</td><td class="num">${U.moneyK(r.proy)}</td><td class="num">${U.int(r.puntos)}</td></tr>`).join('')}</tbody></table></div>
         <div class="tiny text-muted mt-2">Expedientes = alcanzados en el periodo. Mesa / En expediente = cartera abierta hoy. Autorizados y dispersados cuentan como colocados. Proyección = real + en camino.</div>
       </div>
+      ${cSaldoEquipo()}
       <div class="mt-3">${cReconocimiento()}</div>`;
     },
   };
@@ -1218,9 +1258,9 @@
     if (changed) saveCfg();
     const H = (s) => s ? U.hash('k|' + s) : s;
     const anonF = S.ds.funnel.map((f) => ({ key: H(f.key), asesorId: f.asesorId, asesorNombre: f.asesorNombre, tipo: f.tipo, recuperado: f.recuperado, etapa: f.etapa, etapaEf: f.etapaEf, etapaRaw: f.etapaRaw, monto: f.monto, fAsig: f.fAsig, fUlt: f.fUlt, fContacto: f.fContacto, contactado: f.contactado, gestiones: f.gestiones, fExp: f.fExp, fMesa: f.fMesa, fAut: f.fAut, historial: f.historial, cierrePeriodo: f.cierrePeriodo || null, cierreHasta: f.cierreHasta || null, pendienteValidar: f.pendienteValidar, contratos: f.contratos.map(H), nombre: '', proximaAccion: '' }));
-    const anonC = S.ds.colocaciones.map((c) => ({ contrato: H(c.contrato), funnelKey: c.funnelKey ? H(c.funnelKey) : null, asesorId: c.asesorId, asesorNombre: c.asesorNombre, tipo: c.tipo, recuperado: c.recuperado, monto: c.monto, fecha: c.fecha, nombre: '', ajuste: !!c.ajuste, ajusteFuente: c.ajuste ? c.ajusteFuente : undefined }));
+    const anonC = S.ds.colocaciones.map((c) => ({ contrato: H(c.contrato), funnelKey: c.funnelKey ? H(c.funnelKey) : null, asesorId: c.asesorId, asesorNombre: c.asesorNombre, tipo: c.tipo, recuperado: c.recuperado, monto: c.monto, fecha: c.fecha, nombre: '', aplicadoSaldo: c.aplicadoSaldo || 0, aplicadoCred: c.aplicadoCred || 0, ajuste: !!c.ajuste, ajusteFuente: c.ajuste ? c.ajusteFuente : undefined }));
     const strip = (f) => Object.assign({}, f, { telHash: '', curpHash: '' });
-    const team = { cfg: publicCfg(), meta: S.raw.meta, fuenteColocacion: S.ds.fuenteColocacion, generado: new Date().toISOString(), funnel: anonF, colocaciones: anonC, matchStats: S.ds.matchStats };
+    const team = { cfg: publicCfg(), meta: S.raw.meta, fuenteColocacion: S.ds.fuenteColocacion, saldos: Object.fromEntries(Object.entries(S.ds.saldos || {}).map(([k, o]) => [k, Object.assign({}, o, { items: o.items.map((it) => Object.assign({}, it, { cliente: '' })) })])), generado: new Date().toISOString(), funnel: anonF, colocaciones: anonC, matchStats: S.ds.matchStats };
     const pub = { formato: 'binco-reto-publicacion', version: 1, generado: team.generado, equipo: await encrypt(S.cfg.teamKey, team), asesores: {} };
     for (const id of activeIds()) {
       const tok = S.cfg.asesores[id].token;
@@ -1228,6 +1268,7 @@
         asesorId: id, teamKey: S.cfg.teamKey,
         funnel: S.ds.funnel.filter((f) => f.asesorId === id).map(strip),
         colocaciones: S.ds.colocaciones.filter((c) => c.asesorId === id).map(strip),
+        saldo: (S.ds.saldos || {})[id] || null,
       });
     }
     const json = JSON.stringify(pub);
@@ -1264,7 +1305,8 @@
       const funnel = team.funnel.filter((f) => f.asesorId !== mine.asesorId).concat(mine.funnel);
       const coloc = team.colocaciones.filter((c) => c.asesorId !== mine.asesorId).concat(mine.colocaciones);
       const asesores = new Map(Object.keys(S.cfg.asesores).map((id) => [id, S.cfg.asesores[id].nombre]));
-      S.ds = { funnel, colocaciones: coloc, asesores, matchStats: team.matchStats, fuenteColocacion: team.fuenteColocacion };
+      const saldos = Object.assign({}, team.saldos || {}); if (mine.saldo) saldos[mine.asesorId] = mine.saldo;
+      S.ds = { funnel, colocaciones: coloc, asesores, matchStats: team.matchStats, fuenteColocacion: team.fuenteColocacion, saldos };
       S.publication = true;
       S.session = { role: 'asesor', asesorId: mine.asesorId };
       keySet(token); salioSet(false); // recordar el enlace en este dispositivo

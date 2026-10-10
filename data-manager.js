@@ -632,6 +632,7 @@
     // Ajustes de cierre de mes (ej. operaciones tomadas para el bono de septiembre)
     const aj = applyCierres(cfg, reAlias, funnelEff, colocaciones);
     colocaciones = aj.colocaciones;
+    const saldos = aplicarSaldosCierre(cfg, aj.ajustes, colocaciones);
 
     // catálogo de asesores detectados
     const asesores = new Map();
@@ -644,7 +645,7 @@
     colocaciones.forEach((c) => { if (!c.funnelKey) clientesUnicos.add('ICARUS:' + (c.clienteId || c.contrato)); });
 
     return {
-      funnel: funnelEff, colocaciones, asesores, ajustes: aj.ajustes, reemplazadas: aj.reemplazadas,
+      funnel: funnelEff, colocaciones, asesores, ajustes: aj.ajustes, reemplazadas: aj.reemplazadas, saldos,
       fuenteColocacion: usarFunnel ? 'funnel' : 'oficial',
       matchStats: Object.assign({}, m.stats, { coincidencias: m.links.size, pendientes, clientesUnicos: clientesUnicos.size, canceladosExcluidos: icarus.filter((c) => c.cancelado).length }),
     };
@@ -707,6 +708,44 @@
       });
     });
     return { colocaciones: colocaciones.filter((c) => !usados.has(c.contrato) || enMes.has(c.contrato)).concat(virtuales), ajustes, reemplazadas };
+  }
+
+  /**
+   * SALDO PENDIENTE DE UN CIERRE (solo el mes siguiente al cierre, p. ej. cierre sep → se salda en oct).
+   * Pendiente = operaciones del cierre que aún no se autorizan/dispersan (o se cancelaron) + diferencias
+   * cuando se autorizaron por un monto menor al considerado. La colocación NUEVA del asesor en el mes de
+   * saldo se aplica primero a cubrir ese pendiente (monto y contratos, en orden de fecha); solo el excedente
+   * cuenta para la meta de ese mes. Es dinámico: si el cliente pendiente se autoriza, el saldo baja solo.
+   */
+  function aplicarSaldosCierre(cfg, ajustes, colocaciones) {
+    const out = {};
+    (cfg.cierres || []).filter((ci) => ci.activo !== false && ci.saldar !== false).forEach((ci) => {
+      const d = U.fromYmd(ci.periodo + '-01'); d.setMonth(d.getMonth() + 1);
+      const mesSaldo = U.monthKey(U.ymd(d));
+      const rango = { from: mesSaldo + '-01', to: U.monthEnd(mesSaldo + '-01') };
+      (ajustes || []).filter((a) => a.cierreId === ci.id).forEach((a) => {
+        const o = out[a.asesorId] = out[a.asesorId] || { asesorId: a.asesorId, asesorNombre: a.asesorNombre, cierre: ci.nombre, periodo: ci.periodo, mesSaldo, inicialMonto: 0, inicialCred: 0, items: [] };
+        let monto = 0, cred = 0, motivo = '';
+        if (a.colocacion) {
+          const dif = Math.round(a.monto - a.colocacion.monto);
+          if (dif > 0) { monto = dif; motivo = `Autorizado por ${U.money(a.colocacion.monto)} (se consideró ${U.money(a.monto)})`; }
+        } else { monto = a.monto; cred = 1; motivo = a.estado.key === 'perdido' ? 'No prosperó / cancelado' : a.estado.label; }
+        if (monto || cred) { o.inicialMonto += monto; o.inicialCred += cred; o.items.push({ cliente: a.cliente, monto, cred, motivo, estado: a.estado.key }); }
+      });
+      Object.values(out).forEach((o) => {
+        if (o.mesSaldo !== mesSaldo) return;
+        let restM = o.inicialMonto, restC = o.inicialCred;
+        colocaciones.filter((c) => c.asesorId === o.asesorId && !c.ajuste && U.inRange(c.fecha, rango))
+          .sort((x, y) => x.fecha.localeCompare(y.fecha) || x.monto - y.monto)
+          .forEach((c) => {
+            const am = Math.min(restM, c.monto); const ac = restC > 0 ? 1 : 0;
+            if (am || ac) { c.aplicadoSaldo = am; c.aplicadoCred = ac; restM -= am; restC -= ac; }
+          });
+        o.aplicadoMonto = o.inicialMonto - restM; o.aplicadoCred = o.inicialCred - restC;
+        o.pendienteMonto = restM; o.pendienteCred = restC;
+      });
+    });
+    return out;
   }
 
   /** Lee una calculadora de bonos / lista de cierre (cualquier hoja con columnas Asesor, Cliente, Monto…). */
@@ -926,10 +965,15 @@
 
     // --- Colocación real (ICARUS)
     const coloc = ds.colocaciones.filter((c) => byA(c) && byT(c) && U.inRange(c.fecha, range));
-    const monto = coloc.reduce((s, c) => s + c.monto, 0);
-    const creditos = coloc.length;
+    // Lo aplicado a cubrir el saldo de un cierre anterior NO cuenta para la meta del mes
+    const montoBruto = coloc.reduce((s, c) => s + c.monto, 0);
+    const creditosBrutos = coloc.length;
+    const montoAplicado = coloc.reduce((s, c) => s + (c.aplicadoSaldo || 0), 0);
+    const creditosAplicados = coloc.reduce((s, c) => s + (c.aplicadoCred || 0), 0);
+    const monto = montoBruto - montoAplicado;
+    const creditos = creditosBrutos - creditosAplicados;
     const porTipo = {}; TIPOS.forEach((t) => { porTipo[t] = { n: 0, monto: 0 }; });
-    coloc.forEach((c) => { porTipo[c.tipo].n++; porTipo[c.tipo].monto += c.monto; });
+    coloc.forEach((c) => { const pt = porTipo[c.tipo] || porTipo.Otros; pt.n += 1 - (c.aplicadoCred || 0); pt.monto += c.monto - (c.aplicadoSaldo || 0); });
     const recuperados = coloc.filter((c) => c.recuperado).length;
     const ajusteList = coloc.filter((c) => c.ajuste);
     const montoAjuste = ajusteList.reduce((s, c) => s + c.monto, 0);
@@ -1024,10 +1068,10 @@
     }
 
     // --- Ticket y simulador
-    const ticket = creditos ? monto / creditos : null;
+    const ticket = creditosBrutos ? montoBruto / creditosBrutos : null;
 
     return {
-      range, monto, creditos, ticket, porTipo, metaCreditos, avanceCreditos, faltanteCreditos, nivelCreditos: progressLevel(avanceCreditos), montoReal: monto - montoAjuste, montoAjuste, creditosAjuste: ajusteList.length, recuperados, meta, avance, faltante, nivel: progressLevel(avance),
+      range, monto, creditos, ticket, porTipo, montoBruto, creditosBrutos, montoAplicado, creditosAplicados, metaCreditos, avanceCreditos, faltanteCreditos, nivelCreditos: progressLevel(avanceCreditos), montoReal: monto - montoAjuste, montoAjuste, creditosAjuste: ajusteList.length, recuperados, meta, avance, faltante, nivel: progressLevel(avance),
       pipeline, estado, proyeccion, ritmo, bdTotal, bdTrans,
       contactacion: { asignados, trabajados: trabajados.length, contactados: contactados.length, pct: pctContactacion },
       conversion: trabajados.length ? (creditos / trabajados.length) * 100 : null,
