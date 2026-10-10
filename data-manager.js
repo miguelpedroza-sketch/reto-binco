@@ -453,6 +453,9 @@
     return ia > ib;
   }
 
+  /** Etapas del Funnel que BINCO cuenta como COLOCADO (regla comercial: Autorizado y Dispersado). */
+  const COMO_COLOCADO = ['autorizado', 'por_dispersar', 'colocado'];
+
   /** Upsert del Funnel: actualiza registros existentes y conserva historial de etapas. */
   function mergeFunnel(existing, incoming, cargaId, fechaCorte) {
     const map = new Map(existing.map((r) => [r.key, r]));
@@ -462,13 +465,13 @@
       const stamp = r.fUlt || fechaCorte;
       if (!prev) {
         r.historial = [{ etapa: r.etapa, fecha: stamp }];
-        if (r.etapa === 'colocado' && !r.fColoc) r.fColoc = r.fUlt || fechaCorte; // se congela: no se moverá si después cambia la última gestión
+        if (COMO_COLOCADO.includes(r.etapa) && !r.fColoc) r.fColoc = r.fUlt || fechaCorte; // se congela: no se moverá si después cambia la última gestión
         r.cargaId = cargaId; r.primeraCarga = cargaId;
         map.set(r.key, r); nuevos++;
       } else {
         const hist = (prev.historial || []).slice();
         // la fecha de colocación se fija la primera vez que el registro aparece como colocado
-        if (r.etapa === 'colocado' && !r.fColoc) r.fColoc = prev.etapa === 'colocado' ? (prev.fColoc || prev.fUlt || null) : (r.fUlt || fechaCorte);
+        if (COMO_COLOCADO.includes(r.etapa) && !r.fColoc) r.fColoc = COMO_COLOCADO.includes(prev.etapa) ? (prev.fColoc || prev.fUlt || null) : (r.fUlt || fechaCorte);
         if (prev.etapa !== r.etapa) hist.push({ etapa: r.etapa, fecha: stamp });
         const merged = Object.assign({}, prev, r, {
           historial: hist,
@@ -579,7 +582,8 @@
       // Igual que el Tablero comercial: un crédito con FECHA DE COLOCACIÓN en el Funnel cuenta como colocado
       // en esa fecha aunque su estatus todavía diga "Autorizado" o "Por dispersar".
       funnelEff.forEach((f) => {
-        if (!f.contratos.length && f.fColocReporte && ['autorizado', 'por_dispersar', 'colocado'].includes(f.etapa)) { f.pendienteValidar = true; f.etapaEf = 'por_dispersar'; }
+        // Regla BINCO: Autorizado y Dispersado cuentan como colocados (fecha: colocación del reporte → fecha congelada → autorización → última gestión)
+        if (!f.contratos.length && COMO_COLOCADO.includes(f.etapa)) { f.pendienteValidar = true; f.etapaEf = 'por_dispersar'; }
       });
       // Historial de colocación de meses cerrados (p. ej. tomado del Tablero comercial BINCO BI):
       // en esos meses la colocación es EXACTAMENTE la lista del historial (mes y monto), sin depender
@@ -612,7 +616,7 @@
       if (cubiertos.size) colocaciones = colocaciones.filter((c) => c.fuenteHistorial || !c.fecha || !cubiertos.has(c.fecha.slice(0, 7)));
       funnelEff.forEach((f) => {
         if (!f.pendienteValidar) return;
-        const fechaF = f.fColocReporte || f.fColoc || f.fUlt || f.fAut || f.fAsig;
+        const fechaF = f.fColocReporte || f.fColoc || f.fAut || f.fUlt || f.fAsig;
         // En meses cubiertos por el historial solo cuenta lo que está en el historial
         if (fechaF && cubiertos.has(fechaF.slice(0, 7))) { f.etapaEf = 'colocado'; f.pendienteValidar = false; f.contratos = []; f.fueraDeHistorial = true; return; }
         const contrato = f.contrato || ('FN-' + U.hash(f.key).slice(0, 12));
@@ -642,7 +646,7 @@
     return {
       funnel: funnelEff, colocaciones, asesores, ajustes: aj.ajustes, reemplazadas: aj.reemplazadas,
       fuenteColocacion: usarFunnel ? 'funnel' : 'oficial',
-      matchStats: Object.assign({}, m.stats, { coincidencias: m.links.size, pendientes, clientesUnicos: clientesUnicos.size, canceladosExcluidos: icarus.length - colocaciones.length }),
+      matchStats: Object.assign({}, m.stats, { coincidencias: m.links.size, pendientes, clientesUnicos: clientesUnicos.size, canceladosExcluidos: icarus.filter((c) => c.cancelado).length }),
     };
   }
 
@@ -975,7 +979,7 @@
     const estado = {
       enProceso: abiertos.filter((f) => STAGE_IDX[f.etapaEf] >= SI('expediente')).length,
       interes: cnt('interes').length, montoInteres: sum(cnt('interes')),
-      expediente: cnt('expediente').length, mesa: cnt('mesa').length, autorizados: cnt('autorizado').length,
+      expediente: cnt('expediente').length, montoExpediente: sum(cnt('expediente')), mesa: cnt('mesa').length, autorizados: cnt('autorizado').length,
       porDispersar: cnt('por_dispersar').length, pendientesValidar: abiertos.filter((f) => f.pendienteValidar).length,
       montoMesa: sum(cnt('mesa')), montoAutorizados: sum(cnt('autorizado')), montoPorDispersar: sum(cnt('por_dispersar')),
     };
@@ -1075,7 +1079,7 @@
       .sort((a, b) => (STAGE_IDX[b.etapaEf] - STAGE_IDX[a.etapaEf]) || (b.monto - a.monto))
       .slice(0, o.limit || 15)
       .map((f) => ({
-        cliente: U.shortName(f.nombre), etapa: STAGE_LABEL[f.etapaEf], etapaKey: f.etapaEf, monto: f.monto, tipo: f.tipo,
+        cliente: f.nombre || 'Cliente', etapa: STAGE_LABEL[f.etapaEf], etapaKey: f.etapaEf, monto: f.monto, tipo: f.tipo,
         asesor: f.asesorNombre, pendienteValidar: f.pendienteValidar, cierrePeriodo: f.cierrePeriodo || null,
         accion: f.proximaAccion || NEXT_ACTION[f.etapaEf], ultima: f.fUlt,
       }));

@@ -287,8 +287,9 @@
         ${e.interes ? `<span class="state-chip"><b>${e.interes}</b>con interés · ${U.moneyK(e.montoInteres)}</span>` : ''}
         <span class="state-chip"><b>${e.enProceso}</b>expedientes en proceso</span>
         <span class="state-chip"><b>${e.mesa}</b>en Mesa · ${U.moneyK(e.montoMesa)}</span>
-        <span class="state-chip"><b>${e.autorizados}</b>autorizados · ${U.moneyK(e.montoAutorizados)}</span>
-        <span class="state-chip"><b>${e.porDispersar}</b>por dispersar · ${U.moneyK(e.montoPorDispersar)}</span>
+        <span class="state-chip"><b>${e.expediente}</b>en expediente · ${U.moneyK(e.montoExpediente)}</span>
+        ${e.autorizados ? `<span class="state-chip"><b>${e.autorizados}</b>autorizados · ${U.moneyK(e.montoAutorizados)}</span>` : ''}
+        ${e.porDispersar ? `<span class="state-chip"><b>${e.porDispersar}</b>por dispersar · ${U.moneyK(e.montoPorDispersar)}</span>` : ''}
         ${e.pendientesValidar ? `<span class="state-chip"><b>${e.pendientesValidar}</b>por confirmar en colocación oficial</span>` : ''}
       </div>
       <div class="tiny text-muted mt-2">Las cifras "hoy" (chips) muestran tu cartera abierta actual, sin importar el periodo.</div>
@@ -358,9 +359,10 @@
           <div class="proj-line"><span>Faltante real para meta</span><span class="num">${U.money(m.faltante)}</span></div>
         </div>
         <div class="proj-box proj-fore"><span class="proj-tag">PROYECCIÓN · FUNNEL</span>
-          <div class="proj-line"><span>Autorizados y por dispersar</span><span class="num">${U.money(p.enCaminoAut)}</span></div>
-          <div class="proj-line"><span>Operaciones en Mesa</span><span class="num">${U.money(p.enCaminoMesa)}</span></div>
+          ${p.enCaminoAut ? `<div class="proj-line"><span>Autorizados y por dispersar</span><span class="num">${U.money(p.enCaminoAut)}</span></div>` : ''}
+          <div class="proj-line"><span>Operaciones en Mesa (${m.estado.mesa})</span><span class="num">${U.money(p.enCaminoMesa)}</span></div>
           <div class="proj-line total"><span>En camino</span><span class="num">${U.money(p.enCamino)}</span></div>
+          <div class="proj-line tiny text-muted"><span>En expediente (${m.estado.expediente}) · no suma</span><span class="num">${U.money(m.estado.montoExpediente)}</span></div>
         </div>
       </div>
       <div class="stack-bar" title="Real + En camino vs meta"><span class="r" style="width:${rw}%"></span><span class="p" style="width:${pw}%"></span></div>
@@ -368,7 +370,7 @@
         <span>Potencial ${periodTitle()} (real + en camino): <b class="num">${U.money(p.potencial)}</b></span>
         <span>${p.faltanteProyectado > 0 ? `Faltante aun con lo que viene: <b class="num">${U.money(p.faltanteProyectado)}</b>` : '<b class="ok-text">Con lo que tienes en camino alcanzas la meta 🙌</b>'}</span>
       </div>
-      <div class="tiny text-muted mt-2">La proyección no es colocación: depende de que las operaciones se dispersen. Factores aplicados: autorizados ${Math.round(S.cfg.factorAutorizado * 100)}%, Mesa ${Math.round(S.cfg.factorMesa * 100)}%.</div>
+      <div class="tiny text-muted mt-2">La proyección no es colocación: depende de que las operaciones se dispersen. Autorizados y dispersados ya cuentan como colocados. En camino = Mesa al ${Math.round(S.cfg.factorMesa * 100)}%.</div>
     </div>`;
   }
 
@@ -456,8 +458,8 @@
   }
 
   function cCierres(ids, limit, withFilter) {
-    const list = D.nearClosings(S.ds, { asesorIds: ids, tipo: S.tipo, etapa: S.cierresEtapa, limit: limit || 30 });
-    const chips = ['Todas', 'por_dispersar', 'autorizado', 'mesa', 'expediente'].map((k) => `<button class="chip sm ${S.cierresEtapa === k ? 'active' : ''}" data-cierre="${k}">${k === 'Todas' ? 'Todas' : D.STAGE_LABEL[k]}</button>`).join('');
+    const list = D.nearClosings(S.ds, { asesorIds: ids, tipo: S.tipo, etapa: S.cierresEtapa, limit: limit || 30, minStage: S.cierresEtapa === 'interes' ? D.STAGE_IDX.interes : undefined });
+    const chips = ['Todas', 'mesa', 'expediente', 'interes'].map((k) => `<button class="chip sm ${S.cierresEtapa === k ? 'active' : ''}" data-cierre="${k}">${k === 'Todas' ? 'Todas' : D.STAGE_LABEL[k]}</button>`).join('');
     return `<div class="cardx">
       <div class="card-title-x"><span>Clientes más cercanos a colocarse</span><span>🎯</span></div>
       ${withFilter ? `<div class="chip-group mb-2">${chips}</div>` : ''}
@@ -467,7 +469,7 @@
           <div class="fw-bold num text-end">${c.monto ? U.money(c.monto) : '—'}</div>
           <div class="close-action">${esc(c.accion)}</div></div>`).join('')
         : '<div class="empty py-3"><div class="e">🌱</div><div class="small">No hay operaciones en estas etapas. ¡Es buen momento para integrar expedientes!</div></div>'}
-      <div class="tiny text-muted mt-2">🔒 Solo se muestran nombre abreviado, etapa, monto y próxima acción. Sin CURP, teléfonos ni datos bancarios.</div>
+      <div class="tiny text-muted mt-2">🔒 Solo se muestran nombre, etapa, monto y próxima acción. Sin CURP, teléfonos ni datos bancarios.</div>
     </div>`;
   }
 
@@ -584,12 +586,12 @@
    * ---------------------------------------------------------------- */
   const COLS = [
     ['nombre', 'Asesor'], ['meta', 'Meta'], ['monto', 'Colocado'], ['avance', '% Avance'], ['creditos', 'Créditos'], ['avCred', '% Meta créditos'], ['ticket', 'Ticket prom.'],
-    ['contact', 'Contactación'], ['exped', 'Expedientes'], ['mesa', 'Mesa'], ['aut', 'Autorizados'], ['proy', 'Proyección'], ['puntos', 'Puntos'],
+    ['contact', 'Contactación'], ['exped', 'Exp. del periodo'], ['mesa', 'Mesa'], ['aut', 'En expediente'], ['proy', 'Proyección'], ['puntos', 'Puntos'],
   ];
   function adminRows() {
     return G.teamRows(S.ds, S.cfg, range(), S.today, S.tipo).map((r) => ({
       id: r.id, nombre: r.nombre, m: r.m, meta: r.m.meta, monto: r.m.monto, avance: r.m.avance || 0, creditos: r.m.creditos, avCred: r.m.avanceCreditos || 0, ticket: r.m.ticket || 0,
-      contact: r.m.contactacion.pct || 0, exped: r.m.pipeline.find((p) => p.key === 'expediente').n, mesa: r.m.estado.mesa, aut: r.m.estado.autorizados + r.m.estado.porDispersar, proy: r.m.proyeccion.potencial, puntos: r.puntos,
+      contact: r.m.contactacion.pct || 0, exped: r.m.pipeline.find((p) => p.key === 'expediente').n, mesa: r.m.estado.mesa, aut: r.m.estado.expediente, proy: r.m.proyeccion.potencial, puntos: r.puntos,
     }));
   }
   VIEWS.tablero = {
@@ -606,12 +608,13 @@
         ${cMetaGrupal()}
         <div class="cardx"><div class="card-title-x"><span>Equipo ${periodTitle()}</span></div>
           <div class="mini-stats"><div class="mini-stat"><div class="l">Créditos</div><div class="v num">${t.creditos}</div></div><div class="mini-stat"><div class="l">Ticket prom.</div><div class="v num">${U.moneyK(t.ticket)}</div></div><div class="mini-stat"><div class="l">Contactación</div><div class="v num">${U.pct(t.contactacion.pct, 0)}</div></div></div>
-          <div class="mini-stats mt-2"><div class="mini-stat"><div class="l">En Mesa</div><div class="v num">${t.estado.mesa}</div></div><div class="mini-stat"><div class="l">Autorizados</div><div class="v num">${t.estado.autorizados}</div></div><div class="mini-stat"><div class="l">Por dispersar</div><div class="v num">${t.estado.porDispersar}</div></div></div>
+          <div class="mini-stats mt-2"><div class="mini-stat"><div class="l">Con interés</div><div class="v num">${t.estado.interes}</div><div class="s num">${U.moneyK(t.estado.montoInteres)}</div></div><div class="mini-stat"><div class="l">En expediente</div><div class="v num">${t.estado.expediente}</div><div class="s num">${U.moneyK(t.estado.montoExpediente)}</div></div><div class="mini-stat"><div class="l">En Mesa</div><div class="v num">${t.estado.mesa}</div><div class="s num">${U.moneyK(t.estado.montoMesa)}</div></div></div>
         </div>
         <div class="cardx"><div class="card-title-x"><span>Proyección del equipo</span></div>
           <div class="proj-line"><span><span class="proj-tag" style="background:var(--b-azul);color:#fff">REAL</span></span><b class="num">${U.money(t.proyeccion.real)}</b></div>
-          <div class="proj-line"><span><span class="proj-tag" style="background:var(--b-morado);color:#fff">EN CAMINO</span></span><b class="num">${U.money(t.proyeccion.enCamino)}</b></div>
+          <div class="proj-line"><span><span class="proj-tag" style="background:var(--b-morado);color:#fff">EN CAMINO</span> <span class="tiny text-muted">Mesa · ${t.estado.mesa}</span></span><b class="num">${U.money(t.proyeccion.enCamino)}</b></div>
           <div class="proj-line total"><span>Potencial</span><span class="num">${U.money(t.proyeccion.potencial)}</span></div>
+          <div class="proj-line small"><span><span class="proj-tag" style="background:var(--b-turquesa);color:#fff">EXPEDIENTE</span> <span class="tiny text-muted">${t.estado.expediente} · no suma al potencial</span></span><b class="num">${U.money(t.estado.montoExpediente)}</b></div>
           ${pend ? `<button class="btn btn-sm btn-soft mt-2 w-100" data-act="pendientes">⚠️ ${pend} registros por validar</button>` : '<div class="tiny ok-text mt-2">✓ Sin registros pendientes de validar</div>'}
         </div>
       </div>
@@ -624,7 +627,7 @@
           <td class="num lvl-${D.progressLevel(r.m.avance).key}">${U.pct(r.m.avance, 0)}<span class="pbar sm mini-bar"><span style="width:${Math.min(100, r.avance)}%"></span></span></td>
           <td class="num">${r.creditos}${r.m.metaCreditos ? ' <span class="text-muted">/ ' + fmtC(r.m.metaCreditos) + '</span>' : ''}</td><td class="num lvl-${r.m.nivelCreditos.key}">${r.m.metaCreditos ? U.pct(r.m.avanceCreditos, 0) + `<span class="pbar sm mini-bar"><span style="width:${Math.min(100, r.avCred)}%"></span></span>` : '<span class="text-muted">sin meta</span>'}</td><td class="num">${r.ticket ? U.moneyK(r.ticket) : '—'}</td><td class="num">${U.pct(r.m.contactacion.pct, 0)}</td>
           <td class="num">${r.exped}</td><td class="num">${r.mesa}</td><td class="num">${r.aut}</td><td class="num">${U.moneyK(r.proy)}</td><td class="num">${U.int(r.puntos)}</td></tr>`).join('')}</tbody></table></div>
-        <div class="tiny text-muted mt-2">Expedientes = alcanzados en el periodo. Mesa / Autorizados (incluye por dispersar) = cartera abierta hoy. Proyección = real + en camino.</div>
+        <div class="tiny text-muted mt-2">Expedientes = alcanzados en el periodo. Mesa / En expediente = cartera abierta hoy. Autorizados y dispersados cuentan como colocados. Proyección = real + en camino.</div>
       </div>
       <div class="mt-3">${cReconocimiento()}</div>`;
     },
@@ -640,7 +643,7 @@
       <div class="cardx mt-3"><div class="card-title-x"><span>Evolución semanal (últimas 8 semanas)</span></div><div style="height:200px;position:relative"><canvas id="chWeek"></canvas></div></div>
       <div class="cardx mt-3"><div class="card-title-x"><span>Operaciones colocadas ${periodTitle()} (colocación oficial)</span><span>${ops.length}</span></div>
         <div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>Fecha</th><th>Contrato</th><th>Cliente</th><th>Tipo</th><th class="text-end">Monto</th><th>Cruce</th></tr></thead>
-        <tbody>${ops.map((c) => `<tr><td>${U.fmtDateShort(c.fecha)}</td><td>${esc(c.contrato)}</td><td>${esc(U.shortName(c.nombre))}</td><td>${esc(c.tipo)}</td><td class="text-end num">${U.money(c.monto)}</td><td class="tiny">${c.ajuste ? `<span class="stage-pill st-concluido">Ajuste cierre · ${esc(c.ajusteFuente || '')}</span>` : c.matchVia ? { clienteId: 'ID cliente', contrato: 'Contrato', telHash: 'Teléfono', curpHash: 'CURP', nombreNorm: 'Nombre', funnel: 'Funnel' + (c.fechaEstimada ? ' (fecha últ. gestión)' : '') }[c.matchVia] : '<span class="warn-text">sin Funnel</span>'}</td></tr>`).join('') || '<tr><td colspan="6" class="text-muted">Sin colocaciones en el periodo.</td></tr>'}</tbody></table></div></div>
+        <tbody>${ops.map((c) => `<tr><td>${U.fmtDateShort(c.fecha)}</td><td>${esc(c.contrato)}</td><td>${esc(c.nombre || '—')}</td><td>${esc(c.tipo)}</td><td class="text-end num">${U.money(c.monto)}</td><td class="tiny">${c.ajuste ? `<span class="stage-pill st-concluido">Ajuste cierre · ${esc(c.ajusteFuente || '')}</span>` : c.matchVia ? { clienteId: 'ID cliente', contrato: 'Contrato', telHash: 'Teléfono', curpHash: 'CURP', nombreNorm: 'Nombre', funnel: 'Funnel' + (c.fechaEstimada ? ' (fecha últ. gestión)' : '') }[c.matchVia] : '<span class="warn-text">sin Funnel</span>'}</td></tr>`).join('') || '<tr><td colspan="6" class="text-muted">Sin colocaciones en el periodo.</td></tr>'}</tbody></table></div></div>
       <div class="grid g2 mt-3"><div class="cardx"><div class="card-title-x"><span>Retos</span></div>${retos.map((e) => cReto(e, { noPrize: true })).join('') || '<div class="small text-muted">Sin retos en el periodo.</div>'}</div>
       <div class="cardx"><div class="card-title-x"><span>Premios ganados</span></div>${ganados.map((e) => `<div class="reto-prize"><span class="emo">${esc(e.premio.emoji)}</span><div><div class="t">${esc(e.reto.nombre)}</div><div class="n">${esc(e.premio.nombre)}</div></div></div>`).join('') || '<div class="small text-muted">Aún sin premios en este periodo.</div>'}
       <div class="mt-3">${cPuntos(id)}</div></div></div>
@@ -790,7 +793,7 @@
       <p class="small text-muted">Estos registros no se cuentan como colocación hasta que la colocación oficial los confirme (o hasta asignar asesor).</p>
       <h3 class="h6 fw-bold">Marcados como colocados en Funnel sin confirmación en colocación oficial (${f.length})</h3>
       <div class="table-responsive"><table class="table table-sm small"><thead><tr><th>Asesor</th><th>Cliente</th><th>Estatus Funnel</th><th class="text-end">Monto</th><th>Últ. gestión</th></tr></thead><tbody>
-      ${f.map((x) => `<tr><td>${esc(prettyName(x.asesorNombre))}</td><td>${esc(U.shortName(x.nombre))}</td><td>${esc(x.etapaRaw)}</td><td class="text-end">${U.money(x.monto)}</td><td>${U.fmtDateShort(x.fUlt)}</td></tr>`).join('') || '<tr><td colspan="5" class="text-muted">Ninguno</td></tr>'}</tbody></table></div>
+      ${f.map((x) => `<tr><td>${esc(prettyName(x.asesorNombre))}</td><td>${esc(x.nombre || '—')}</td><td>${esc(x.etapaRaw)}</td><td class="text-end">${U.money(x.monto)}</td><td>${U.fmtDateShort(x.fUlt)}</td></tr>`).join('') || '<tr><td colspan="5" class="text-muted">Ninguno</td></tr>'}</tbody></table></div>
       <h3 class="h6 fw-bold mt-3">Colocaciones oficiales sin asesor identificado (${c.length})</h3>
       <div class="table-responsive"><table class="table table-sm small"><thead><tr><th>Contrato</th><th>Fecha</th><th class="text-end">Monto</th></tr></thead><tbody>
       ${c.map((x) => `<tr><td>${esc(x.contrato)}</td><td>${U.fmtDateShort(x.fecha)}</td><td class="text-end">${U.money(x.monto)}</td></tr>`).join('') || '<tr><td colspan="3" class="text-muted">Ninguna</td></tr>'}</tbody></table></div>`);
