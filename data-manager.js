@@ -618,7 +618,8 @@
         if (!f.pendienteValidar) return;
         const fechaF = f.fColocReporte || f.fColoc || f.fAut || f.fUlt || f.fAsig;
         // En meses cubiertos por el historial solo cuenta lo que está en el historial
-        if (fechaF && cubiertos.has(fechaF.slice(0, 7))) { f.etapaEf = 'colocado'; f.pendienteValidar = false; f.contratos = []; f.fueraDeHistorial = true; return; }
+        // (solo meses YA CERRADOS: en el mes en curso, lo autorizado después de pegar el Tablero también cuenta)
+        if (fechaF && cubiertos.has(fechaF.slice(0, 7)) && fechaF.slice(0, 7) < (cfg._hoy || U.today()).slice(0, 7)) { f.etapaEf = 'colocado'; f.pendienteValidar = false; f.contratos = []; f.fueraDeHistorial = true; return; }
         const contrato = f.contrato || ('FN-' + U.hash(f.key).slice(0, 12));
         colocaciones.push({
           contrato, fecha: fechaF, monto: f.monto || 0, asesorId: f.asesorId, asesorNombre: f.asesorNombre,
