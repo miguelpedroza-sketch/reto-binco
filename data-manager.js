@@ -469,8 +469,23 @@
   function mergeFunnel(existing, incoming, cargaId, fechaCorte) {
     const map = new Map(existing.map((r) => [r.key, r]));
     let nuevos = 0, actualizados = 0;
+    // Índices secundarios: si el reporte cambia de formato (p. ej. sin Folio), el lead se reconoce
+    // por ID cliente, contrato, teléfono, CURP o nombre + asesor, y NO se duplica.
+    const idx = new Map();
+    const llaves = (r) => [
+      r.clienteId && 'C:' + U.norm(r.clienteId), r.contrato && 'K:' + U.norm(r.contrato),
+      r.telHash && 'T:' + r.telHash + '|' + r.asesorId, r.curpHash && 'U:' + r.curpHash,
+      r.nombreNorm && 'N:' + U.nameKey(r.nombreNorm) + '|' + r.asesorId,
+    ].filter(Boolean);
+    existing.forEach((r) => llaves(r).forEach((k) => { if (!idx.has(k)) idx.set(k, r.key); }));
+    const usados = new Set();
     incoming.forEach((r) => {
-      const prev = map.get(r.key);
+      let prev = map.get(r.key);
+      if (!prev) {
+        const k = llaves(r).map((x) => idx.get(x)).find((x) => x && !usados.has(x));
+        if (k) { prev = map.get(k); r.key = k; }
+      }
+      if (prev) usados.add(prev.key);
       const stamp = r.fUlt || fechaCorte;
       if (!prev) {
         r.historial = [{ etapa: r.etapa, fecha: stamp }];
