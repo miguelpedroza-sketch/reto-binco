@@ -477,13 +477,20 @@
       r.telHash && 'T:' + r.telHash + '|' + r.asesorId, r.curpHash && 'U:' + r.curpHash,
       r.nombreNorm && 'N:' + U.nameKey(r.nombreNorm) + '|' + r.asesorId,
     ].filter(Boolean);
-    existing.forEach((r) => llaves(r).forEach((k) => { if (!idx.has(k)) idx.set(k, r.key); }));
+    existing.forEach((r) => llaves(r).forEach((k) => { if (!idx.has(k)) idx.set(k, []); idx.get(k).push(r.key); }));
     const usados = new Set();
+    // primero los que coinciden por llave principal (para que no se los "gane" otro registro)
+    incoming.forEach((r) => { if (map.has(r.key)) usados.add(r.key); });
     incoming.forEach((r) => {
       let prev = map.get(r.key);
       if (!prev) {
-        const k = llaves(r).map((x) => idx.get(x)).find((x) => x && !usados.has(x));
-        if (k) { prev = map.get(k); r.key = k; }
+        for (const x of llaves(r)) {
+          const cands = (idx.get(x) || []).filter((k) => !usados.has(k));
+          if (!cands.length) continue;
+          // si hay varios (mismo cliente con dos leads), se prefiere el que está en la misma etapa
+          const k = cands.find((k) => map.get(k).etapa === r.etapa) || cands[0];
+          prev = map.get(k); r.key = k; break;
+        }
       }
       if (prev) usados.add(prev.key);
       const stamp = r.fUlt || fechaCorte;
