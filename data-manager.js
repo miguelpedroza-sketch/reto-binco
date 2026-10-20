@@ -222,8 +222,8 @@
       { key: 'leadId', label: 'Folio / ID Lead', syn: ['id lead', 'lead id', 'folio', 'id', 'id oportunidad', 'id prospecto', 'folio solicitud', 'folio lead', 'no solicitud'] },
       { key: 'telefono', label: 'Teléfono', syn: ['telefono', 'celular', 'tel', 'movil', 'whatsapp', 'numero telefonico', 'telefono celular', 'telefono cliente'] },
       { key: 'curp', label: 'CURP', syn: ['curp'] },
-      { key: 'tipo', label: 'Tipo de crédito', syn: ['tipo', 'tipo credito', 'tipo de credito', 'producto', 'tipo operacion', 'tipo de operacion', 'linea', 'segmento', 'tipo cliente', 'tipo de cliente'] },
-      { key: 'monto', label: 'Monto solicitado / potencial', syn: ['monto', 'monto solicitado', 'importe', 'monto credito', 'monto potencial', 'monto autorizado', 'cantidad solicitada', 'monto propuesto', 'monto del credito'] },
+      { key: 'tipo', label: 'Tipo de crédito', syn: ['tipo', 'tipo credito', 'tipo de credito', 'producto', 'tipo operacion', 'tipo de operacion', 'linea', 'segmento', 'tipo cliente', 'tipo de cliente', 'fuente'] },
+      { key: 'monto', label: 'Monto solicitado / potencial', syn: ['monto', 'monto solicitado', 'importe', 'monto credito', 'monto potencial', 'monto autorizado', 'cantidad solicitada', 'monto propuesto', 'monto del credito', 'solicitado'] },
       { key: 'fechaAsignacion', label: 'Fecha de asignación', syn: ['fecha asignacion', 'fecha alta', 'fecha creacion', 'fecha registro', 'fecha lead', 'fecha de asignacion', 'creado', 'fecha ingreso', 'fecha de alta', 'fecha de creacion', 'fecha'] },
       { key: 'fechaUltimaGestion', label: 'Fecha última gestión', syn: ['ultima gestion', 'fecha ultima gestion', 'ult gestion', 'ult actividad', 'fecha ult gestion', 'ultimo movimiento', 'fecha gestion', 'fecha actualizacion', 'ultima actividad', 'fecha modificacion', 'modificado', 'fecha ultimo contacto', 'fecha de ultima gestion', 'ultima actualizacion'] },
       { key: 'fechaContacto', label: 'Fecha de contacto', syn: ['fecha contacto', 'fecha primer contacto', 'fecha de contacto', 'fecha contacto efectivo'] },
@@ -394,7 +394,16 @@
   function resolveAsesor(nombre, cfg) {
     const id = U.normName(nombre) || 'SIN ASESOR';
     const alias = (cfg && cfg.asesorAlias) || {};
-    return alias[id] || id;
+    if (alias[id]) return alias[id];
+    // Nombre corto (p. ej. "Irving" en lugar de "Irving Azpeitia Luna"): si coincide con UN solo
+    // asesor ya registrado con nombre completo, se toma como ese asesor (evita duplicar al equipo).
+    const ases = (cfg && cfg.asesores) || {};
+    if (id !== 'SIN ASESOR' && !(ases[id] && ases[id].metaBase)) {
+      const toks = id.split(' ');
+      const cands = Object.keys(ases).filter((k) => k !== id && k.split(' ').length > toks.length && toks.every((t) => k.split(' ').includes(t)));
+      if (cands.length === 1) return cands[0];
+    }
+    return id;
   }
 
   /* ---------------------------------------------------------------
@@ -473,7 +482,16 @@
         // la fecha de colocación se fija la primera vez que el registro aparece como colocado
         if (COMO_COLOCADO.includes(r.etapa) && !r.fColoc) r.fColoc = COMO_COLOCADO.includes(prev.etapa) ? (prev.fColoc || prev.fUlt || null) : (r.fUlt || fechaCorte);
         if (prev.etapa !== r.etapa) hist.push({ etapa: r.etapa, fecha: stamp });
-        const merged = Object.assign({}, prev, r, {
+        // Un reporte con menos columnas no borra lo que ya se sabía (fechas, montos, tipo, gestiones…)
+        const rLimpio = {};
+        Object.keys(r).forEach((k) => {
+          const v = r[k];
+          if (v == null || v === '') return;
+          if (k === 'tipo' && v === 'Otros' && prev.tipo) return;
+          if (k === 'asesorNombre' && prev.asesorId === r.asesorId && String(prev.asesorNombre || '').length > String(v).length) return;
+          rLimpio[k] = v;
+        });
+        const merged = Object.assign({}, prev, rLimpio, {
           historial: hist,
           cargaId,
           primeraCarga: prev.primeraCarga,

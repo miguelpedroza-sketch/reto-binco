@@ -43,6 +43,7 @@
     const src = new D.FileSource(S.store);
     const all = await src.loadAll();
     Object.assign(S.raw, all, { meta: (await S.store.get('meta')) || {} });
+    try { const rb = await S.store.get('respaldoCarga'); if (rb) S.respaldo = { fecha: rb.fecha, archivo: rb.archivo }; } catch (e) {}
     rebuild();
     bindGlobal();
     let sess = null;
@@ -721,6 +722,7 @@
           <button class="btn btn-sm btn-outline-binco" data-act="demo">🧪 Cargar datos de demostración</button>
           <button class="btn btn-sm btn-outline-binco" data-act="goCierres">📌 Ajuste de cierre de mes${(S.cfg.cierres || []).length ? ' (' + S.cfg.cierres.length + ')' : ''}</button>
           <button class="btn btn-sm btn-binco" data-act="publicar">📤 Publicar para el equipo</button>
+          ${S.respaldo ? `<button class="btn btn-sm btn-outline-danger" data-act="deshacerCarga">↩️ Deshacer última carga (${esc(S.respaldo.archivo)})</button>` : ''}
         </div>
         <div class="tiny text-muted mt-2">La información nunca se reemplaza: cada carga actualiza los registros existentes y agrega los nuevos, guardando el histórico de etapas y una foto diaria por asesor.</div>
       </div>`;
@@ -790,6 +792,11 @@
     Object.assign(S.cfg.stageMap, P.stageOverrides);
     const an = D.analyze(src, P.table.rows, P.mapping, S.cfg);
     const cargaId = U.uid(); const now = new Date().toISOString();
+    // respaldo para poder deshacer esta carga
+    try {
+      await S.store.set('respaldoCarga', { fecha: now, archivo: P.fileName, funnel: S.raw.funnel, icarus: S.raw.icarus, cargas: S.raw.cargas, meta: S.raw.meta, asesores: JSON.parse(JSON.stringify(S.cfg.asesores)) });
+      S.respaldo = { fecha: now, archivo: P.fileName };
+    } catch (e) { console.warn('Sin respaldo', e); }
     let res;
     if (src === 'funnel') { res = D.mergeFunnel(S.raw.funnel, an.records, cargaId, S.today); S.raw.funnel = res.records; }
     else { res = D.mergeIcarus(S.raw.icarus, an.records, cargaId); S.raw.icarus = res.records; }
@@ -1496,6 +1503,16 @@
         return;
       }
       case 'backup': dlBlob(`binco_respaldo_${S.today}.json`, new Blob([JSON.stringify({ formato: 'binco-reto-respaldo', version: 1, cfg: S.cfg, raw: S.raw })], { type: 'application/json' })); return;
+      case 'deshacerCarga': {
+        const rb = await S.store.get('respaldoCarga');
+        if (!rb) { S.respaldo = null; render(); return toast('No hay carga para deshacer.'); }
+        if (!confirm('Se quitará la carga "' + rb.archivo + '" y la información quedará como estaba antes de subirla. ¿Continuar?')) return;
+        S.raw.funnel = rb.funnel || []; S.raw.icarus = rb.icarus || []; S.raw.cargas = rb.cargas || []; S.raw.meta = rb.meta || {};
+        if (rb.asesores) S.cfg.asesores = rb.asesores;
+        await S.store.set('respaldoCarga', null); S.respaldo = null; S.lastImport = null;
+        saveCfg(); await saveRaw(); rebuild(); render(); toast('Carga deshecha.');
+        return;
+      }
       case 'wipe': if (confirm('Esto borra TODA la información cargada y el histórico de este navegador. ¿Continuar?') && confirm('¿Seguro? Esta acción no se puede deshacer.')) { await S.store.clear(); S.raw = { funnel: [], icarus: [], cargas: [], snapshots: [], meta: {} }; rebuild(); render(); toast('Datos borrados.'); } return;
       default:
     }
