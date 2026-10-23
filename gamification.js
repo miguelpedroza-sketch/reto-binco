@@ -72,12 +72,13 @@
     expedientes: { label: 'Expedientes integrados', unidad: 'expedientes', fmt: 'int', get: (m) => m.eventos.expedientes },
     mesa: { label: 'Expedientes enviados a Mesa', unidad: 'envíos a Mesa', fmt: 'int', get: (m) => m.eventos.mesa },
     autorizados: { label: 'Autorizados', unidad: 'autorizados', fmt: 'int', get: (m) => m.eventos.autorizados },
-    creditos: { label: 'Créditos colocados', unidad: 'créditos', fmt: 'int', get: (m) => m.creditos },
-    monto: { label: 'Monto colocado', unidad: 'MXN', fmt: 'money', get: (m) => m.monto },
+    // En los retos cuentan TODOS los créditos autorizados/dispersados del periodo (también los que cubren el saldo del cierre anterior)
+    creditos: { label: 'Créditos colocados (autorizados y dispersados)', unidad: 'créditos', fmt: 'int', get: (m) => (m.creditosBrutos != null ? m.creditosBrutos : m.creditos) },
+    monto: { label: 'Monto colocado (autorizado y dispersado)', unidad: 'MXN', fmt: 'money', get: (m) => (m.montoBruto != null ? m.montoBruto : m.monto) },
     renovaciones: { label: 'Renovaciones colocadas', unidad: 'renovaciones', fmt: 'int', get: (m) => m.porTipo['Renovación'].n },
     recuperados: { label: 'Clientes recuperados', unidad: 'clientes', fmt: 'int', get: (m) => m.recuperados },
     conversion: { label: 'Conversión (colocados / leads trabajados)', unidad: '%', fmt: 'pct', get: (m) => m.conversion || 0 },
-    colocacion_grupal: { label: 'Colocación grupal (monto del equipo)', unidad: 'MXN', fmt: 'money', grupal: true, get: (m) => m.monto },
+    colocacion_grupal: { label: 'Colocación grupal (monto del equipo)', unidad: 'MXN', fmt: 'money', grupal: true, get: (m) => (m.montoBruto != null ? m.montoBruto : m.monto) },
   };
   function fmtInd(ind, v) {
     const f = (INDICADORES[ind] || {}).fmt;
