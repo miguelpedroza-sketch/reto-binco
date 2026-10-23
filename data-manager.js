@@ -645,7 +645,16 @@
           const f = cands[0] || null;
           const mEnd = U.monthEnd(it.mes + '-01');
           const enMes = (d) => d && d.slice(0, 7) === it.mes;
-          const fecha = f && enMes(f.fColocReporte) ? f.fColocReporte : (f && enMes(f.fColoc) ? f.fColoc : (f && enMes(f.fUlt) ? f.fUlt : mEnd));
+          // Fecha: colocación del reporte → fecha congelada cuando el Funnel ya lo tiene como colocado →
+          // fecha del Tablero (pegado − días sin gestión) → última gestión del Funnel → fin de mes.
+          // Si el Funnel aún no lo tiene como colocado (reporte de leads atrasado), NO se usa su fecha vieja.
+          const yaColocado = f && COMO_COLOCADO.includes(f.etapa);
+          const fecha = f && enMes(f.fColocReporte) ? f.fColocReporte
+            : (yaColocado && enMes(f.fColoc)) ? f.fColoc
+              : enMes(it.fechaRef) ? it.fechaRef
+                : (enMes(it.pegado) && !yaColocado) ? it.pegado
+                  : (f && (yaColocado || !it.pegado) && enMes(f.fColoc)) ? f.fColoc
+                    : (f && (yaColocado || !it.pegado) && enMes(f.fUlt)) ? f.fUlt : mEnd;
           const contrato = (f && f.contrato) || ('BI-' + U.hash(it.nameKey + it.mes + i).slice(0, 12));
           colocaciones.push({
             contrato, fecha, monto: Number(it.monto) || 0, asesorId: aId, asesorNombre: f ? f.asesorNombre : it.asesorNombre,
@@ -885,7 +894,12 @@
       const nr = U.normName(resto);
       const a = asesores.find((x) => x.clave && nr.includes(x.clave));
       if (!cliente || !monto || /^\d/.test(cliente)) continue;
-      items.push({ cliente, nameKey: U.nameKey(cliente), asesorId: a ? a.id : '', asesorNombre: a ? a.nombre : '', monto, mes });
+      // columna "Sin gestión" (días) justo después del monto → fecha aproximada de la última gestión (= colocación reciente)
+      const hoy = (cfg && cfg._hoy) || U.today();
+      const tras = resto.split(/\$\s?[\d,]+(?:\.\d+)?/)[1] || '';
+      const dm = tras.match(/^\s*(\d{1,3})(?:\s|$)/);
+      const fechaRef = dm ? U.addDays(hoy, -Number(dm[1])) : null;
+      items.push({ cliente, nameKey: U.nameKey(cliente), asesorId: a ? a.id : '', asesorNombre: a ? a.nombre : '', monto, mes, fechaRef, pegado: hoy });
     }
     return { mes, items };
   }
