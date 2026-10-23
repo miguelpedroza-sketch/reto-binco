@@ -325,8 +325,8 @@
       <div class="state-chips">
         ${e.interes ? `<span class="state-chip"><b>${e.interes}</b>con interés · ${U.moneyK(e.montoInteres)}</span>` : ''}
         <span class="state-chip"><b>${e.enProceso}</b>expedientes en proceso</span>
-        <span class="state-chip"><b>${e.mesa}</b>en Mesa · ${U.moneyK(e.montoMesa)}</span>
-        <span class="state-chip"><b>${e.expediente}</b>en expediente · ${U.moneyK(e.montoExpediente)}</span>
+        <span class="state-chip" role="button" data-nav="cierres" data-cierre="mesa" title="Ver clientes"><b>${e.mesa}</b>en Mesa · ${U.moneyK(e.montoMesa)} ›</span>
+        <span class="state-chip" role="button" data-nav="cierres" data-cierre="expediente" title="Ver clientes"><b>${e.expediente}</b>en expediente · ${U.moneyK(e.montoExpediente)} ›</span>
         ${e.autorizados ? `<span class="state-chip"><b>${e.autorizados}</b>autorizados · ${U.moneyK(e.montoAutorizados)}</span>` : ''}
         ${e.porDispersar ? `<span class="state-chip"><b>${e.porDispersar}</b>por dispersar · ${U.moneyK(e.montoPorDispersar)}</span>` : ''}
         ${e.pendientesValidar ? `<span class="state-chip"><b>${e.pendientesValidar}</b>por confirmar en colocación oficial</span>` : ''}
@@ -496,6 +496,26 @@
     });
   }
 
+  /** Mis clientes en Expediente y en Mesa (nombre, monto, última gestión). Solo los del propio asesor. */
+  function cEnProceso(id) {
+    const grupos = [['expediente', '📁', 'En expediente'], ['mesa', '🏛️', 'En Mesa de control']].map(([k, emo, tit]) => {
+      const list = D.nearClosings(S.ds, { asesorIds: [id], tipo: S.tipo, etapa: k, limit: 50 }).filter((c) => c.etapaKey === k);
+      return { k, emo, tit, list };
+    });
+    if (!grupos.some((g) => g.list.length)) return '';
+    const item = (c) => `<div class="close-item">
+        <div><div class="close-name">${esc(c.cliente)}${c.cierrePeriodo ? ` <span class="stage-pill st-concluido" title="Ya se contó en el cierre de ${esc(c.cierrePeriodo)}">contado en cierre ${esc(U.monthName(c.cierrePeriodo + '-01').split(' ')[0])}</span>` : ''}</div>
+        <div class="tiny text-muted">${esc(c.tipo)}${c.ultima ? ' · últ. gestión ' + U.fmtDateShort(c.ultima) : ''}${c.accion ? ' · ' + esc(c.accion) : ''}</div></div>
+        <div class="fw-bold num text-end">${c.monto ? U.money(c.monto) : '—'}</div></div>`;
+    return `<div class="cardx span2">
+      <div class="card-title-x"><span>Mis clientes en proceso</span><button class="btn btn-sm btn-link p-0" data-nav="cierres" data-cierre="Todas">Ver todos →</button></div>
+      ${grupos.filter((g) => g.list.length).map((g) => `<div class="mt-2">
+        <div class="small fw-bold mb-1">${g.emo} ${g.tit} <span class="text-muted fw-normal">· ${g.list.length} · ${U.money(g.list.reduce((s2, c) => s2 + (c.monto || 0), 0))}</span></div>
+        ${g.list.map(item).join('')}</div>`).join('')}
+      <div class="tiny text-muted mt-2">🔒 Solo tú ves los nombres de tus clientes.</div>
+    </div>`;
+  }
+
   function cCierres(ids, limit, withFilter) {
     const list = D.nearClosings(S.ds, { asesorIds: ids, tipo: S.tipo, etapa: S.cierresEtapa, limit: limit || 30, minStage: S.cierresEtapa === 'interes' ? D.STAGE_IDX.interes : undefined });
     const chips = ['Todas', 'mesa', 'expediente', 'interes'].map((k) => `<button class="chip sm ${S.cierresEtapa === k ? 'active' : ''}" data-cierre="${k}">${k === 'Todas' ? 'Todas' : D.STAGE_LABEL[k]}</button>`).join('');
@@ -585,6 +605,7 @@
       return `<div class="grid home">
         ${cKpi(m)}
         ${cSaldo([id])}
+        ${cEnProceso(id)}
         ${cCreditos(m)}
         ${cRetoSemanal(id)}
         <div class="span2">${cPipeline(m, true)}</div>
@@ -1362,7 +1383,7 @@
     if (t.id === 'btnReentrar') { salioSet(false); location.replace(location.pathname); return; }
     if (t.id === 'btnOlvidar') { if (confirm('¿Olvidar el enlace guardado en este teléfono? Para volver a entrar tendrás que abrir de nuevo tu enlace personal.')) { keySet(''); salioSet(false); try { window.localStorage.removeItem('binco_reto_nombre'); } catch (e) { /* */ } showLogin(); } return; }
     const d = t.dataset;
-    if (d.nav) { S.view = d.nav; render(); return; }
+    if (d.nav) { if (d.cierre) S.cierresEtapa = d.cierre; S.view = d.nav; render(); return; }
     if (d.sort) { S.sort = { key: d.sort, dir: S.sort.key === d.sort ? -S.sort.dir : (d.sort === 'nombre' ? 1 : -1) }; render(); return; }
     if (d.asesor && t.tagName === 'TR') { openAsesorDetail(d.asesor); return; }
     if (d.cierre) { S.cierresEtapa = d.cierre; render(); return; }
