@@ -1288,7 +1288,8 @@
     const anonF = S.ds.funnel.map((f) => ({ key: H(f.key), asesorId: f.asesorId, asesorNombre: f.asesorNombre, tipo: f.tipo, recuperado: f.recuperado, etapa: f.etapa, etapaEf: f.etapaEf, etapaRaw: f.etapaRaw, monto: f.monto, fAsig: f.fAsig, fUlt: f.fUlt, fContacto: f.fContacto, contactado: f.contactado, gestiones: f.gestiones, fExp: f.fExp, fMesa: f.fMesa, fAut: f.fAut, historial: f.historial, cierrePeriodo: f.cierrePeriodo || null, cierreHasta: f.cierreHasta || null, pendienteValidar: f.pendienteValidar, contratos: f.contratos.map(H), nombre: '', proximaAccion: '' }));
     const anonC = S.ds.colocaciones.map((c) => ({ contrato: H(c.contrato), funnelKey: c.funnelKey ? H(c.funnelKey) : null, asesorId: c.asesorId, asesorNombre: c.asesorNombre, tipo: c.tipo, recuperado: c.recuperado, monto: c.monto, fecha: c.fecha, nombre: '', aplicadoSaldo: c.aplicadoSaldo || 0, aplicadoCred: c.aplicadoCred || 0, ajuste: !!c.ajuste, ajusteFuente: c.ajuste ? c.ajusteFuente : undefined }));
     const strip = (f) => Object.assign({}, f, { telHash: '', curpHash: '' });
-    const team = { cfg: publicCfg(), meta: S.raw.meta, fuenteColocacion: S.ds.fuenteColocacion, saldos: Object.fromEntries(Object.entries(S.ds.saldos || {}).map(([k, o]) => [k, Object.assign({}, o, { items: o.items.map((it) => Object.assign({}, it, { cliente: '' })) })])), generado: new Date().toISOString(), funnel: anonF, colocaciones: anonC, matchStats: S.ds.matchStats };
+    const team = { cfg: publicCfg(), meta: S.raw.meta, fuenteColocacion: S.ds.fuenteColocacion, saldos: Object.fromEntries(Object.entries(S.ds.saldos || {}).map(([k, o]) => [k, Object.assign({}, o, { items: o.items.map((it) => Object.assign({}, it, { cliente: '' })) })])), generado: new Date().toISOString(), funnel: anonF, colocaciones: anonC, matchStats: S.ds.matchStats,
+      reemplazadas: (S.ds.reemplazadas || []).map((c) => ({ contrato: H(c.contrato), funnelKey: c.funnelKey ? H(c.funnelKey) : null, asesorId: c.asesorId, tipo: c.tipo, monto: c.monto, fecha: c.fecha, nombre: '' })) };
     const pub = { formato: 'binco-reto-publicacion', version: 1, generado: team.generado, equipo: await encrypt(S.cfg.teamKey, team), asesores: {} };
     for (const id of activeIds()) {
       const tok = S.cfg.asesores[id].token;
@@ -1334,7 +1335,7 @@
       const coloc = team.colocaciones.filter((c) => c.asesorId !== mine.asesorId).concat(mine.colocaciones);
       const asesores = new Map(Object.keys(S.cfg.asesores).map((id) => [id, S.cfg.asesores[id].nombre]));
       const saldos = Object.assign({}, team.saldos || {}); if (mine.saldo) saldos[mine.asesorId] = mine.saldo;
-      S.ds = { funnel, colocaciones: coloc, asesores, matchStats: team.matchStats, fuenteColocacion: team.fuenteColocacion, saldos };
+      S.ds = { funnel, colocaciones: coloc, asesores, matchStats: team.matchStats, fuenteColocacion: team.fuenteColocacion, saldos, reemplazadas: team.reemplazadas || [] };
       S.publication = true;
       S.session = { role: 'asesor', asesorId: mine.asesorId };
       keySet(token); salioSet(false); // recordar el enlace en este dispositivo

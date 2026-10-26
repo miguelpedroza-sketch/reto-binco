@@ -110,7 +110,17 @@
     const grupal = reto.modo === 'grupal' || ind.grupal;
     const ids = grupal ? participantIds(reto, cfg) : [asesorId];
     const m = D.compute(ds, { cfg, range: { from: reto.inicio, to: reto.fin }, asesorIds: ids, tipo: reto.tipo || 'Todos', today });
-    const valor = ind.get(m);
+    let valor = ind.get(m);
+    // Retos de colocación: también cuentan los créditos que Mesa autorizó en las fechas del reto aunque
+    // ya se hubieran contado en un cierre de mes anterior (no cambian la meta ni el saldo, solo el reto).
+    if (['monto', 'creditos', 'colocacion_grupal'].includes(reto.indicador)) {
+      const vistos = new Set();
+      const extra = (ds.reemplazadas || []).filter((c) => ids.includes(c.asesorId) && c.fecha && c.fecha >= reto.inicio && c.fecha <= reto.fin
+        && (!reto.tipo || reto.tipo === 'Todos' || c.tipo === reto.tipo)
+        && !ds.colocaciones.some((x) => x.contrato === c.contrato && !x.ajuste && x.fecha >= reto.inicio && x.fecha <= reto.fin))
+        .filter((c) => { const k = c.funnelKey || c.contrato; if (vistos.has(k)) return false; vistos.add(k); return true; });
+      valor += reto.indicador === 'creditos' ? extra.length : extra.reduce((s, c) => s + (Number(c.monto) || 0), 0);
+    }
     const meta = Number(reto.meta) || 0;
     const progreso = meta ? (valor / meta) * 100 : 0;
     const premio = (cfg.premios || []).find((p) => p.id === reto.premioId) || null;
