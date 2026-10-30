@@ -1418,7 +1418,7 @@
   root.BincoData = {
     U, STAGES, STAGE_IDX, STAGE_LABEL, TIPOS, FIELDS, OPEN_STAGES,
     detectStage, detectTipo, suggestMapping, validateMapping, findHeaderRow, tableFromMatrix, guessSource, readFile,
-    normalizeFunnel, normalizeIcarus, analyze, mergeFunnel, mergeIcarus, match, buildDataset,
+    normalizeFunnel, normalizeIcarus, resolveAsesor, analyze, mergeFunnel, mergeIcarus, match, buildDataset,
     compute, dailySeries, weeklySeries, nearClosings, activityDays, metaMensual, metaRange, metaEquipoRange, progressLevel,
     isContacted, isWorked, reachedIdx, stageDate,
     Store, ConfigStore, FileSource, ApiSource, deepMerge, demoData,

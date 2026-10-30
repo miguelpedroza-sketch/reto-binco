@@ -313,3 +313,30 @@ body { min-height: 100vh; }
 .table-x thead th:first-child { z-index: 2; }
 .table-x tbody tr:hover td:first-child { background: var(--b-azul-soft); }
 @media (max-width: 575.98px) { #viewAs { max-width: 128px !important; font-size: .75rem; } }
+
+/* ===== Pendientes del día (vienen del Cockpit Comercial) ===== */
+.nav-badge { display: inline-block; min-width: 18px; padding: 1px 5px; margin-left: 4px; border-radius: 9px; background: var(--b-magenta); color: #fff; font-size: .62rem; font-weight: 800; line-height: 1.4; text-align: center; vertical-align: top; }
+.bottom-nav button .i { position: relative; }
+.bottom-nav .nav-badge { position: absolute; top: -6px; right: -14px; margin: 0; }
+.pnd-aviso { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-left: 4px solid var(--b-magenta); cursor: pointer; }
+.pnd-aviso.ok { border-left-color: var(--b-turquesa); cursor: default; }
+.pnd-big { font-size: 1.15rem; font-weight: 800; }
+.pnd-big .num { font-size: 1.6rem; color: var(--b-azul); margin-right: 2px; }
+.pnd-cats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.pnd-cat { border: 1.5px solid var(--line); background: var(--card); border-radius: 12px; padding: 8px 10px; text-align: left; display: grid; grid-template-columns: auto 1fr; column-gap: 6px; align-items: center; color: inherit; }
+.pnd-cat b { font-size: 1.25rem; }
+.pnd-cat small { grid-column: 1 / -1; color: var(--muted); font-size: .7rem; line-height: 1.2; }
+.pnd-cat.on { border-color: var(--b-azul); background: var(--b-azul-soft); }
+.pnd-item { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; background: var(--card); }
+.pnd-item.done { opacity: .55; }
+.pnd-item.done .pnd-name { text-decoration: line-through; }
+.pnd-top { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.pnd-name { font-weight: 800; }
+.pnd-tag { display: inline-block; font-size: .65rem; font-weight: 700; padding: 1px 6px; border-radius: 6px; background: #FFF3D6; color: #8A5A00; vertical-align: middle; }
+.pnd-dias { font-size: .72rem; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.pnd-dias.alto { color: var(--b-magenta); }
+.pnd-mot { font-size: .82rem; color: var(--muted); margin-top: 2px; }
+.pnd-acc { font-size: .86rem; font-weight: 600; margin-top: 4px; }
+.pnd-btns { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.pnd-chk { display: inline-flex; align-items: center; gap: 5px; font-size: .78rem; font-weight: 600; margin-left: auto; cursor: pointer; }
+@media (max-width: 575px) { .pnd-cats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .pnd-chk { margin-left: 0; } }

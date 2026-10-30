@@ -18,14 +18,14 @@
   const S = {
     today: /^\d{4}-\d{2}-\d{2}$/.test(qs.get('hoy') || '') ? qs.get('hoy') : U.today(), // ?hoy=AAAA-MM-DD solo para pruebas
     cfg: null, store: null,
-    raw: { funnel: [], icarus: [], cargas: [], snapshots: [], meta: {} },
+    raw: { funnel: [], icarus: [], cargas: [], snapshots: [], meta: {}, pendientes: null },
     ds: null, session: null, viewAs: '', view: null,
     period: { p: 'mes', from: null, to: null }, tipo: 'Todos',
     sort: { key: 'avance', dir: -1 }, search: '', cierresEtapa: 'Todas', cfgTab: 'metas',
     charts: {}, pending: null, lastImport: null, publication: null,
   };
 
-  const ASESOR_TABS = [['inicio', '🏠', 'Inicio'], ['avance', '📈', 'Mi avance'], ['cierres', '🎯', 'Cierres'], ['retos', '🏆', 'Retos'], ['equipo', '👥', 'Equipo']];
+  const ASESOR_TABS = [['inicio', '🏠', 'Inicio'], ['pendientes', '📋', 'Pendientes'], ['avance', '📈', 'Mi avance'], ['cierres', '🎯', 'Cierres'], ['retos', '🏆', 'Retos'], ['equipo', '👥', 'Equipo']];
   const ADMIN_TABS = [['tablero', '📊', 'Equipo'], ['cargar', '📥', 'Cargar datos'], ['retosAdm', '🏆', 'Retos'], ['premios', '🎁', 'Premios'], ['config', '⚙️', 'Ajustes']];
 
   /* ------------------------------------------------------------------
@@ -43,6 +43,7 @@
     const src = new D.FileSource(S.store);
     const all = await src.loadAll();
     Object.assign(S.raw, all, { meta: (await S.store.get('meta')) || {} });
+    try { S.raw.pendientes = (await S.store.get('pendientes')) || null; } catch (e) { S.raw.pendientes = null; }
     try { const rb = await S.store.get('respaldoCarga'); if (rb) S.respaldo = { fecha: rb.fecha, archivo: rb.archivo }; } catch (e) {}
     rebuild();
     bindGlobal();
@@ -154,7 +155,9 @@
 
   function renderNav() {
     const tabs = asesorMode() ? ASESOR_TABS : ADMIN_TABS;
-    const html = (cls) => tabs.map(([k, i, l]) => `<button data-nav="${k}" class="${S.view === k ? 'active' : ''}">${cls ? `<span class="i">${i}</span>` : i + ' '}${l}</button>`).join('');
+    const nP = asesorMode() && typeof pndDe === 'function' ? (() => { const P = pndDe(currentAsesor()); if (!P) return 0; const h = pndHechos(P); return P.items.filter((it) => !h.has(pndKey(it))).length; })() : 0;
+    const badge = (k) => k === 'pendientes' && nP ? `<span class="nav-badge">${nP > 99 ? '99+' : nP}</span>` : '';
+    const html = (cls) => tabs.map(([k, i, l]) => `<button data-nav="${k}" class="${S.view === k ? 'active' : ''}">${cls ? `<span class="i">${i}${badge(k)}</span>` : i + ' '}${l}${cls ? '' : badge(k)}</button>`).join('');
     $('#topNav').innerHTML = html(false);
     $('#bottomNav').innerHTML = html(true);
   }
@@ -598,11 +601,131 @@
    * VISTAS — ASESOR
    * ---------------------------------------------------------------- */
   const VIEWS = {};
+  /* ------------------------------------------------------------------
+   * PENDIENTES DEL DÍA (vienen del Cockpit Comercial: «Exportar pendientes para el Reto»)
+   * Se publican dentro del paquete cifrado de cada asesor; el equipo solo recibe conteos.
+   * ---------------------------------------------------------------- */
+  const PND_CATS = [['responder', '💬', 'Contestaron y esperan', 'Ya levantaron la mano: atiéndelos primero.'],
+    ['llamar', '📞', 'Llamar hoy', 'WhatsApp no los alcanza. Máximo 3 intentos.'],
+    ['cerrar', '🏁', 'Por cerrar', 'Expediente o autorizado sin desembolso.'],
+    ['seguimiento', '🔁', 'Interesados sin seguimiento', 'Mostraron interés y llevan 2+ días sin gestión.']];
+  const PND_CAT_IDX = Object.fromEntries(PND_CATS.map((c, i) => [c[0], i]));
+  S.pndCat = '';
+  function pndAsesorId(nombre) { return D.resolveAsesor(nombre, S.cfg); }
+  /** Pendientes de un asesor: en la app publicada vienen ya filtrados; en modo supervisor se filtran aquí. */
+  function pndDe(id) {
+    if (S.publication) return S.pnd && S.pnd.asesorId === id ? S.pnd : null;
+    const P = S.raw.pendientes; if (!P) return null;
+    return { asesorId: id, datosAl: P.datosAl, generado: P.generado, items: P.items.filter((it) => pndAsesorId(it.ase) === id) };
+  }
+  function pndResumen() {
+    if (S.publication) return S.pndResumen || null;
+    const P = S.raw.pendientes; if (!P) return null;
+    const por = {};
+    P.items.forEach((it) => { const id = pndAsesorId(it.ase); const o = por[id] || (por[id] = { total: 0, responder: 0, llamar: 0, cerrar: 0, seguimiento: 0 }); o.total++; o[it.cat] = (o[it.cat] || 0) + 1; });
+    return { datosAl: P.datosAl, por };
+  }
+  function pndCuenta(P) { const c = { total: 0, responder: 0, llamar: 0, cerrar: 0, seguimiento: 0 }; (P ? P.items : []).forEach((it) => { c.total++; c[it.cat]++; }); return c; }
+  // Marcas «ya lo atendí» solo en este dispositivo; se reinician con cada lista nueva.
+  const PND_HK = 'binco_reto_pnd_hecho';
+  function pndHechos(P) { try { const o = JSON.parse(window.localStorage.getItem(PND_HK) || '{}'); return o.lista === (P.asesorId + '|' + P.generado) ? new Set(o.k || []) : new Set(); } catch (e) { return new Set(); } }
+  function pndSetHecho(P, key, on) { try { const s = pndHechos(P); if (on) s.add(key); else s.delete(key); window.localStorage.setItem(PND_HK, JSON.stringify({ lista: P.asesorId + '|' + P.generado, k: [...s] })); } catch (e) { /* sin almacenamiento */ } }
+  const pndKey = (it) => it.cat + '|' + (it.folio || it.nombre);
+  const pndDias = (n) => n == null ? '' : n === 0 ? 'hoy' : n === 1 ? '1 día' : n + ' días';
+  function pndVieja(P) { return P && P.datosAl && P.datosAl < S.today; }
+
+  async function handlePendientes(file) {
+    try {
+      const P = JSON.parse(await file.text());
+      if (!P || P.formato !== 'binco-pendientes' || !Array.isArray(P.items)) return toast('Este archivo no es de pendientes. Descárgalo en el Cockpit → Hoy → «Exportar pendientes para el Reto».');
+      const items = P.items.filter((it) => it && PND_CAT_IDX[it.cat] != null).map((it) => ({
+        cat: it.cat, ord: +it.ord || 0, ase: String(it.ase || 'Sin asesor'), folio: String(it.folio || ''), nombre: String(it.nombre || ''),
+        tels: (Array.isArray(it.tels) ? it.tels : []).map(String).slice(0, 4), etapa: String(it.etapa || ''), monto: +it.monto || null, llantas: !!it.llantas,
+        coment: String(it.coment || '').slice(0, 140), dias: it.dias == null ? null : +it.dias, camp: String(it.camp || ''), intentos: it.intentos == null ? null : +it.intentos,
+        motivo: String(it.motivo || ''), accion: String(it.accion || '') }));
+      S.raw.pendientes = { datosAl: String(P.datosAl || ''), generado: String(P.generado || ''), archivo: file.name, items };
+      await S.store.set('pendientes', S.raw.pendientes);
+      S.cfg.cambiosSinPublicar = true; D.ConfigStore.save(S.cfg);
+      const sinAsesor = [...new Set(items.map((it) => it.ase).filter((a) => !S.cfg.asesores[pndAsesorId(a)]))];
+      toast(`Pendientes cargados: ${U.int(items.length)} del ${U.fmtDate(S.raw.pendientes.datosAl)}.` + (sinAsesor.length ? ` Sin asesor registrado: ${sinAsesor.join(', ')}.` : ' Publica para que el equipo los vea.'));
+      render();
+    } catch (e) { console.error(e); toast('No se pudo leer el archivo de pendientes: ' + e.message); }
+  }
+  function cPndCarga() {
+    const P = S.raw.pendientes; const R = pndResumen();
+    const filas = R ? Object.entries(R.por).sort((a, b) => b[1].total - a[1].total).map(([id, c]) => `<tr><td>${esc(S.cfg.asesores[id] ? name(id) : id + ' (no registrado)')}</td><td class="num fw-bold">${c.total}</td><td class="num">${c.responder}</td><td class="num">${c.llamar}</td><td class="num">${c.cerrar}</td><td class="num">${c.seguimiento}</td></tr>`).join('') : '';
+    return `<label class="drop d-block mt-3" data-drop="pendientes"><input type="file" accept=".json" hidden data-file="pendientes"><div class="e">📋</div><div class="t">Pendientes del día (Cockpit Comercial)</div>
+      <div class="small text-muted">Arrastra aquí <b>pendientes_reto_AAAA-MM-DD.json</b> · se genera en el Cockpit → Hoy → «Exportar pendientes para el Reto»</div></label>
+      ${P ? `<div class="cardx mt-2"><div class="card-title-x"><span>Pendientes cargados · datos al ${esc(U.fmtDate(P.datosAl))}</span><span>${U.int(P.items.length)}</span></div>
+        ${pndVieja(P) ? '<div class="small warn-text mb-2">⚠️ Esta lista no es de hoy: exporta una nueva desde el Cockpit antes de publicar.</div>' : ''}
+        <div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>Asesor</th><th class="text-end">Total</th><th class="text-end">💬</th><th class="text-end">📞</th><th class="text-end">🏁</th><th class="text-end">🔁</th></tr></thead><tbody>${filas}</tbody></table></div>
+        <div class="tiny text-muted mt-2">Cada asesor solo recibe sus pendientes (cifrados con su enlace). El equipo solo ve conteos.</div></div>` : ''}`;
+  }
+  function cPndAviso(id) {
+    const P = pndDe(id); if (!P) return '';
+    const c = pndCuenta(P); const hechos = pndHechos(P); const rest = P.items.filter((it) => !hechos.has(pndKey(it))).length;
+    if (!c.total) return `<div class="cardx span2 pnd-aviso ok"><div><b>✓ Sin pendientes</b><div class="small text-muted">Tu lista del ${esc(U.fmtDate(P.datosAl))} está vacía. ¡Buen trabajo!</div></div></div>`;
+    return `<div class="cardx span2 pnd-aviso" role="button" data-nav="pendientes"><div><div class="pnd-big"><span class="num">${rest}</span> pendiente${rest === 1 ? '' : 's'} por atender</div>
+      <div class="small text-muted">${c.responder ? `<b>${c.responder}</b> te contestaron y esperan · ` : ''}${c.llamar} llamadas · ${c.cerrar} por cerrar · ${c.seguimiento} seguimientos${pndVieja(P) ? ' · <span class="warn-text">lista del ' + esc(U.fmtDate(P.datosAl)) + '</span>' : ''}</div></div>
+      <span class="btn btn-binco btn-sm">Ver mis pendientes →</span></div>`;
+  }
+  function cPndEquipo() {
+    const R = pndResumen(); if (!R || !Object.keys(R.por).length) return '';
+    const rows = Object.entries(R.por).filter(([id]) => S.cfg.asesores[id]).sort((a, b) => b[1].total - a[1].total);
+    return `<div class="cardx mt-3"><div class="card-title-x"><span>Pendientes del día por asesor · datos al ${esc(U.fmtDate(R.datosAl))}</span></div>
+      <div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>Asesor</th><th class="text-end">Total</th><th class="text-end">💬 Contestaron</th><th class="text-end">📞 Llamar</th><th class="text-end">🏁 Por cerrar</th><th class="text-end">🔁 Seguimiento</th></tr></thead>
+      <tbody>${rows.map(([id, c]) => `<tr><td class="fw-bold">${esc(name(id))}</td><td class="num fw-bold">${c.total}</td><td class="num">${c.responder}</td><td class="num">${c.llamar}</td><td class="num">${c.cerrar}</td><td class="num">${c.seguimiento}</td></tr>`).join('')}</tbody></table></div>
+      <div class="tiny text-muted mt-2">Misma lista que «Hoy» en el Cockpit. Se vacía cuando el asesor registra la gestión en el Funnel y se carga la siguiente lista.</div></div>`;
+  }
+  VIEWS.pendientes = {
+    html() {
+      const id = currentAsesor(); const P = pndDe(id);
+      if (!P) return `<div class="cardx empty"><div class="e">📋</div><h2 class="h5 fw-bold mt-2">Aún no hay pendientes publicados</h2><p class="mb-0">Tu supervisor los publica cada mañana junto con tu avance.</p></div>`;
+      const c = pndCuenta(P); const hechos = pndHechos(P);
+      const cat = S.pndCat && c[S.pndCat] ? S.pndCat : (PND_CATS.find((x) => c[x[0]]) || PND_CATS[0])[0];
+      const meta = PND_CATS[PND_CAT_IDX[cat]];
+      const list = P.items.filter((it) => it.cat === cat).sort((a, b) => (hechos.has(pndKey(a)) - hechos.has(pndKey(b))) || a.ord - b.ord);
+      const card = (it) => { const h = hechos.has(pndKey(it)); const k = pndKey(it);
+        return `<div class="pnd-item${h ? ' done' : ''}">
+          <div class="pnd-top"><div class="pnd-name">${esc(it.nombre || '(sin nombre)')}${it.llantas ? ' <span class="pnd-tag">Llantas</span>' : ''}</div>${it.dias != null ? `<span class="pnd-dias${it.dias >= 3 ? ' alto' : ''}">${pndDias(it.dias)}</span>` : ''}</div>
+          <div class="pnd-mot">${esc(it.motivo)}${it.etapa ? ' · ' + esc(it.etapa) : ''}${it.monto ? ' · ' + U.money(it.monto) : ''}</div>
+          <div class="pnd-acc">👉 ${esc(it.accion)}</div>
+          ${it.coment ? `<div class="tiny text-muted mt-1">Último comentario: ${esc(it.coment)}</div>` : ''}
+          <div class="pnd-btns">
+            ${it.folio ? `<button class="btn btn-sm btn-soft" data-pnd-copy="${esc(it.folio)}">📋 Folio ${esc(it.folio)}</button>` : ''}
+            ${it.tels.map((t) => `<a class="btn btn-sm btn-light" href="tel:${esc(t.replace(/[^\d+]/g, ''))}">📞 ${esc(t)}</a>`).join('')}
+            <label class="pnd-chk"><input type="checkbox" data-pnd-hecho="${esc(k)}" ${h ? 'checked' : ''}> Ya lo gestioné</label>
+          </div></div>`; };
+      const rest = P.items.filter((it) => !hechos.has(pndKey(it))).length;
+      return `<div class="cardx">
+        <div class="d-flex flex-wrap justify-content-between align-items-end gap-2">
+          <div><div class="card-title-x mb-1"><span>Mis pendientes · datos al ${esc(U.fmtDate(P.datosAl))}</span></div>
+            <div class="pnd-big"><span class="num">${rest}</span> de ${c.total} por atender</div></div>
+          <div class="pbar" style="min-width:160px;flex:1;max-width:280px"><span style="width:${c.total ? Math.round((c.total - rest) / c.total * 100) : 0}%"></span></div>
+        </div>
+        ${pndVieja(P) ? `<div class="alert alert-warning small py-2 mt-2 mb-0">Esta lista es del ${esc(U.fmtDate(P.datosAl))}. Tu supervisor publicará la de hoy; mientras, revisa en el Funnel antes de llamar.</div>` : ''}
+        <div class="pnd-cats mt-3">${PND_CATS.map(([k, e, t]) => `<button class="pnd-cat${k === cat ? ' on' : ''}" data-pnd-cat="${k}"><span>${e}</span><b class="num">${c[k]}</b><small>${t}</small></button>`).join('')}</div>
+        <div class="small text-muted mt-3 mb-2">${esc(meta[3])} Registra cada gestión en el Funnel con el folio; con la siguiente carga el pendiente desaparece.</div>
+        ${list.length ? list.map(card).join('') : '<div class="small text-muted py-3 text-center">Nada en esta sección.</div>'}
+        <div class="tiny text-muted mt-2">«Ya lo gestioné» solo se guarda en este teléfono para que lleves tu control del día; lo oficial es lo que registras en el Funnel.</div>
+      </div>`;
+    },
+  };
+  document.addEventListener('click', async (e) => {
+    const c = e.target.closest('[data-pnd-cat]'); if (c) { S.pndCat = c.dataset.pndCat; render(); return; }
+    const f = e.target.closest('[data-pnd-copy]'); if (f) { try { await navigator.clipboard.writeText(f.dataset.pndCopy); toast('Folio copiado: ' + f.dataset.pndCopy); } catch (er) { toast('Folio: ' + f.dataset.pndCopy); } }
+  });
+  document.addEventListener('change', (e) => {
+    const h = e.target.closest('[data-pnd-hecho]'); if (!h) return;
+    const P = pndDe(currentAsesor()); if (!P) return; pndSetHecho(P, h.dataset.pndHecho, h.checked);
+    const y = window.scrollY; render(); window.scrollTo(0, y);
+  });
   VIEWS.inicio = {
     html() {
       if (!hasData()) return emptyState();
       const id = currentAsesor(); const m = compute([id]);
       return `<div class="grid home">
+        ${cPndAviso(id)}
         ${cKpi(m)}
         ${cSaldo([id])}
         ${cEnProceso(id)}
@@ -690,6 +813,7 @@
           <td class="num">${r.exped}</td><td class="num">${r.mesa}</td><td class="num">${r.aut}</td><td class="num">${U.moneyK(r.proy)}</td><td class="num">${U.int(r.puntos)}</td></tr>`).join('')}</tbody></table></div>
         <div class="tiny text-muted mt-2">Expedientes = alcanzados en el periodo. Mesa / En expediente = cartera abierta hoy. Autorizados y dispersados cuentan como colocados. Proyección = real + en camino.</div>
       </div>
+      ${cPndEquipo()}
       ${cSaldoEquipo()}
       <div class="mt-3">${cReconocimiento()}</div>`;
     },
@@ -727,6 +851,7 @@
         <label class="drop" data-drop="funnel"><input type="file" accept=".xlsx,.xls,.csv" hidden data-file="funnel"><div class="e">📋</div><div class="t">Excel / CSV del Funnel BINCO</div><div class="small text-muted">Arrastra aquí o toca para elegir · leads, gestiones, contactación, expedientes, Mesa, autorizaciones</div></label>
         <label class="drop" data-drop="icarus"><input type="file" accept=".xlsx,.xls,.csv" hidden data-file="icarus"><div class="e">🏦</div><div class="t">Colocación oficial (ICARUS o sistema nuevo)</div><div class="small text-muted">Arrastra aquí o toca para elegir · colocación oficial: contrato, fecha, monto</div></label>
       </div>
+      ${cPndCarga()}
       <div id="mapPanel" class="mt-3">${S.pending ? mapPanelHtml() : ''}</div>
       <div id="importResult" class="mt-3">${S.lastImport ? importResultHtml() : ''}</div>
       <div class="cardx mt-3"><div class="card-title-x"><span>Estado actual de la información</span></div>
@@ -761,6 +886,7 @@
   }
 
   async function handleFile(file, zone) {
+    if (zone === 'pendientes' || /\.json$/i.test(file.name)) return handlePendientes(file);
     if (!/\.(xlsx|xls|csv)$/i.test(file.name)) return toast('Formato no válido. Usa .xlsx, .xls o .csv');
     try {
       const t = await D.readFile(file);
@@ -1290,6 +1416,7 @@
     const strip = (f) => Object.assign({}, f, { telHash: '', curpHash: '' });
     const team = { cfg: publicCfg(), meta: S.raw.meta, fuenteColocacion: S.ds.fuenteColocacion, saldos: Object.fromEntries(Object.entries(S.ds.saldos || {}).map(([k, o]) => [k, Object.assign({}, o, { items: o.items.map((it) => Object.assign({}, it, { cliente: '' })) })])), generado: new Date().toISOString(), funnel: anonF, colocaciones: anonC, matchStats: S.ds.matchStats,
       reemplazadas: (S.ds.reemplazadas || []).map((c) => ({ contrato: H(c.contrato), funnelKey: c.funnelKey ? H(c.funnelKey) : null, asesorId: c.asesorId, tipo: c.tipo, monto: c.monto, fecha: c.fecha, nombre: '' })) };
+    { const R = pndResumen(); if (R) team.pendResumen = { datosAl: R.datosAl, por: Object.fromEntries(Object.entries(R.por).filter(([id]) => S.cfg.asesores[id])) }; }
     const pub = { formato: 'binco-reto-publicacion', version: 1, generado: team.generado, equipo: await encrypt(S.cfg.teamKey, team), asesores: {} };
     for (const id of activeIds()) {
       const tok = S.cfg.asesores[id].token;
@@ -1298,6 +1425,7 @@
         funnel: S.ds.funnel.filter((f) => f.asesorId === id).map(strip),
         colocaciones: S.ds.colocaciones.filter((c) => c.asesorId === id).map(strip),
         saldo: (S.ds.saldos || {})[id] || null,
+        pendientes: pndDe(id),
       });
     }
     const json = JSON.stringify(pub);
@@ -1337,6 +1465,7 @@
       const saldos = Object.assign({}, team.saldos || {}); if (mine.saldo) saldos[mine.asesorId] = mine.saldo;
       S.ds = { funnel, colocaciones: coloc, asesores, matchStats: team.matchStats, fuenteColocacion: team.fuenteColocacion, saldos, reemplazadas: team.reemplazadas || [] };
       S.publication = true;
+      S.pnd = mine.pendientes || null; S.pndResumen = team.pendResumen || null;
       S.session = { role: 'asesor', asesorId: mine.asesorId };
       keySet(token); salioSet(false); // recordar el enlace en este dispositivo
       try { window.localStorage.setItem('binco_reto_nombre', (S.cfg.asesores[mine.asesorId] || {}).nombre || ''); } catch (e) { /* sin almacenamiento */ }
