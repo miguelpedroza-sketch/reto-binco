@@ -664,11 +664,22 @@
         tels: (Array.isArray(it.tels) ? it.tels : []).map(String).slice(0, 4), etapa: String(it.etapa || ''), monto: +it.monto || null, llantas: !!it.llantas,
         coment: String(it.coment || '').slice(0, 140), dias: it.dias == null ? null : +it.dias, camp: String(it.camp || ''), intentos: it.intentos == null ? null : +it.intentos,
         motivo: String(it.motivo || ''), accion: String(it.accion || '') }));
-      S.raw.pendientes = { datosAl: String(P.datosAl || ''), generado: String(P.generado || ''), archivo: file.name, items };
+      const nueva = { datosAl: String(P.datosAl || ''), generado: String(P.generado || ''), archivo: file.name, items };
+      const baseDe = (L) => ({ datosAl: L.datosAl, generado: L.generado, items: L.items.map((it) => ({ ase: it.ase, folio: it.folio, nombre: it.nombre })) });
+      const prev = S.raw.pendientes, B0 = S.raw.pendBase;
+      // Una lista MÁS VIEJA del mismo día (p. ej. la de la mañana subida otra vez) solo sirve como punto de partida:
+      // no reemplaza la lista vigente.
+      if (prev && prev.datosAl === nueva.datosAl && nueva.generado && prev.generado && nueva.generado < prev.generado) {
+        if (!B0 || B0.datosAl !== nueva.datosAl || nueva.generado < B0.generado) { S.raw.pendBase = baseDe(nueva); await S.store.set('pendBase', S.raw.pendBase); S.cfg.cambiosSinPublicar = true; D.ConfigStore.save(S.cfg); toast(`Lista de las ${pndHora(nueva.generado)} guardada como inicio del día. Ya puedes ver el avance en Equipo.`); }
+        else toast(`Esa lista (${pndHora(nueva.generado)}) es posterior a la de inicio del día (${pndHora(B0.generado)}) y anterior a la vigente: no se usó.`);
+        render(); return;
+      }
+      S.raw.pendientes = nueva;
       const B = S.raw.pendBase; let esBase = false;
-      if (!B || B.datosAl !== S.raw.pendientes.datosAl) { // primera lista del día = punto de partida para medir el avance
-        S.raw.pendBase = { datosAl: S.raw.pendientes.datosAl, generado: S.raw.pendientes.generado, items: items.map((it) => ({ ase: it.ase, folio: it.folio, nombre: it.nombre })) };
-        await S.store.set('pendBase', S.raw.pendBase); esBase = true;
+      if (!B || B.datosAl !== nueva.datosAl) { // primera lista del día = punto de partida para medir el avance
+        // si ya había otra lista del mismo día cargada antes, esa es el inicio del día
+        S.raw.pendBase = baseDe(prev && prev.datosAl === nueva.datosAl && prev.generado < nueva.generado ? prev : nueva);
+        await S.store.set('pendBase', S.raw.pendBase); esBase = S.raw.pendBase.generado === nueva.generado;
       }
       await S.store.set('pendientes', S.raw.pendientes);
       S.cfg.cambiosSinPublicar = true; D.ConfigStore.save(S.cfg);
@@ -684,7 +695,7 @@
       <div class="small text-muted">Arrastra aquí <b>pendientes_reto_AAAA-MM-DD.json</b> · se genera en el Cockpit → Hoy → «Exportar pendientes para el Reto»</div></label>
       ${P ? `<div class="cardx mt-2"><div class="card-title-x"><span>Pendientes cargados · datos al ${esc(U.fmtDate(P.datosAl))}</span><span>${U.int(P.items.length)}</span></div>
         ${pndVieja(P) ? '<div class="small warn-text mb-2">⚠️ Esta lista no es de hoy: exporta una nueva desde el Cockpit antes de publicar.</div>' : ''}
-        <div class="small text-muted mb-2">${R && R.desde && R.desde !== R.corte ? `Avance medido contra la lista de inicio del día (${esc(pndHora(R.desde))}) · última lista: ${esc(pndHora(R.corte))}. Míralo en <b>Equipo</b>.` : 'Esta es la lista de inicio del día. Para medir el avance, exporta otra desde el Cockpit después de cargar el Funnel actualizado y súbela aquí.'}</div>
+        <div class="small text-muted mb-2">${R && R.desde && R.desde !== R.corte ? `Avance medido contra la lista de inicio del día (${esc(pndHora(R.desde))}) · última lista: ${esc(pndHora(R.corte))}. Míralo en <b>Equipo</b>.` : 'Esta es la lista de inicio del día. Para medir el avance, exporta otra desde el Cockpit después de cargar el Funnel actualizado y súbela aquí. ¿Ya tenías una lista de más temprano? Súbela aquí también y se usará como inicio del día.'}</div>
         <div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>Asesor</th><th class="text-center">Total</th><th class="text-center">💬</th><th class="text-center">📞</th><th class="text-center">🏁</th><th class="text-center">🔁</th></tr></thead><tbody>${filas}</tbody></table></div>
         <div class="tiny text-muted mt-2">Cada asesor solo recibe sus pendientes (cifrados con su enlace). El equipo solo ve conteos.</div></div>` : ''}`;
   }
@@ -709,7 +720,7 @@
       <div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>Asesor</th><th class="text-center">Al inicio</th><th class="text-center">✅ Atendidos</th><th class="text-center">Siguen</th><th class="text-center">Avance</th>
         <th class="text-center">Ahora</th><th class="text-center">💬</th><th class="text-center">📞</th><th class="text-center">🏁</th><th class="text-center">🔁</th></tr></thead>
       <tbody>${rows.map(([id, c]) => `<tr><td class="fw-bold">${esc(name(id))}</td>${avCells(c)}<td class="num fw-bold text-center">${c.total}</td><td class="num text-center">${c.responder}</td><td class="num text-center">${c.llamar}</td><td class="num text-center">${c.cerrar}</td><td class="num text-center">${c.seguimiento}</td></tr>`).join('')}</tbody></table></div>
-      <div class="tiny text-muted mt-2">${hayAv ? '«Atendidos» = estaban en la lista de inicio del día y ya salieron porque el Funnel trae su gestión (no cuenta lo que el asesor solo palomeó). «Nuevos» = entraron a la lista durante el día.' : 'El avance aparece cuando cargas una segunda lista del mismo día (después de subir el Funnel actualizado al Cockpit).'} Íconos: 💬 contestaron · 📞 llamar · 🏁 por cerrar · 🔁 seguimiento.</div></div>`;
+      <div class="tiny text-muted mt-2">${hayAv ? '«Atendidos» = estaban en la lista de inicio del día y ya salieron porque el Funnel trae su gestión (no cuenta lo que el asesor solo palomeó). «Nuevos» = entraron a la lista durante el día.' : 'El avance aparece cuando hay dos listas del mismo día. Si tienes la lista de la mañana, súbela en Cargar datos: se usa como inicio del día sin reemplazar la actual.'} Íconos: 💬 contestaron · 📞 llamar · 🏁 por cerrar · 🔁 seguimiento.</div></div>`;
   }
   VIEWS.pendientes = {
     html() {
