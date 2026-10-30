@@ -43,7 +43,7 @@
     const src = new D.FileSource(S.store);
     const all = await src.loadAll();
     Object.assign(S.raw, all, { meta: (await S.store.get('meta')) || {} });
-    try { S.raw.pendientes = (await S.store.get('pendientes')) || null; } catch (e) { S.raw.pendientes = null; }
+    try { S.raw.pendientes = (await S.store.get('pendientes')) || null; S.raw.pendBase = (await S.store.get('pendBase')) || null; } catch (e) { S.raw.pendientes = null; }
     try { const rb = await S.store.get('respaldoCarga'); if (rb) S.respaldo = { fecha: rb.fecha, archivo: rb.archivo }; } catch (e) {}
     rebuild();
     bindGlobal();
@@ -616,20 +616,41 @@
   function pndDe(id) {
     if (S.publication) return S.pnd && S.pnd.asesorId === id ? S.pnd : null;
     const P = S.raw.pendientes; if (!P) return null;
-    return { asesorId: id, datosAl: P.datosAl, generado: P.generado, items: P.items.filter((it) => pndAsesorId(it.ase) === id) };
+    return { asesorId: id, datosAl: P.datosAl, generado: P.generado, items: P.items.filter((it) => pndAsesorId(it.ase) === id), avance: pndAvance(id) };
   }
   function pndResumen() {
     if (S.publication) return S.pndResumen || null;
     const P = S.raw.pendientes; if (!P) return null;
     const por = {};
-    P.items.forEach((it) => { const id = pndAsesorId(it.ase); const o = por[id] || (por[id] = { total: 0, responder: 0, llamar: 0, cerrar: 0, seguimiento: 0 }); o.total++; o[it.cat] = (o[it.cat] || 0) + 1; });
-    return { datosAl: P.datosAl, por };
+    const nuevo = () => ({ total: 0, responder: 0, llamar: 0, cerrar: 0, seguimiento: 0 });
+    P.items.forEach((it) => { const id = pndAsesorId(it.ase); const o = por[id] || (por[id] = nuevo()); o.total++; o[it.cat] = (o[it.cat] || 0) + 1; });
+    const B = S.raw.pendBase;
+    if (B && B.datosAl === P.datosAl) B.items.forEach((it) => { const id = pndAsesorId(it.ase); if (!por[id]) por[id] = nuevo(); });
+    Object.keys(por).forEach((id) => { const a = pndAvance(id); if (a) por[id].av = { base: a.base, atendidos: a.atendidos, siguen: a.siguen, nuevos: a.nuevos }; });
+    return { datosAl: P.datosAl, por, desde: B && B.datosAl === P.datosAl ? B.generado : null, corte: P.generado };
   }
+  /** Avance del día: compara la lista con la que arrancó el día contra la última cargada.
+   *  «Atendido» = estaba en la lista de la mañana y ya no aparece (el Funnel ya trae su gestión). */
+  const pndLead = (it) => it.folio ? 'f:' + it.folio : 'n:' + U.normName(it.nombre);
+  function pndAvance(id) {
+    if (S.publication) return (S.pnd && S.pnd.asesorId === id && S.pnd.avance) || null;
+    const B = S.raw.pendBase, P = S.raw.pendientes;
+    if (!B || !P || B.datosAl !== P.datosAl || B.generado === P.generado) return null;
+    const base = new Set(B.items.filter((it) => pndAsesorId(it.ase) === id).map(pndLead));
+    const ahora = new Set(P.items.filter((it) => pndAsesorId(it.ase) === id).map(pndLead));
+    if (!base.size && !ahora.size) return null;
+    let atendidos = 0, siguen = 0, nuevos = 0;
+    base.forEach((k) => { if (ahora.has(k)) siguen++; else atendidos++; });
+    ahora.forEach((k) => { if (!base.has(k)) nuevos++; });
+    return { desde: B.generado, corte: P.generado, base: base.size, atendidos, siguen, nuevos };
+  }
+  const pndPct = (a) => a && a.base ? Math.round(a.atendidos / a.base * 100) : 0;
+  const pndHora = (iso) => { try { return new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } };
   function pndCuenta(P) { const c = { total: 0, responder: 0, llamar: 0, cerrar: 0, seguimiento: 0 }; (P ? P.items : []).forEach((it) => { c.total++; c[it.cat]++; }); return c; }
   // Marcas «ya lo atendí» solo en este dispositivo; se reinician con cada lista nueva.
   const PND_HK = 'binco_reto_pnd_hecho';
-  function pndHechos(P) { try { const o = JSON.parse(window.localStorage.getItem(PND_HK) || '{}'); return o.lista === (P.asesorId + '|' + P.generado) ? new Set(o.k || []) : new Set(); } catch (e) { return new Set(); } }
-  function pndSetHecho(P, key, on) { try { const s = pndHechos(P); if (on) s.add(key); else s.delete(key); window.localStorage.setItem(PND_HK, JSON.stringify({ lista: P.asesorId + '|' + P.generado, k: [...s] })); } catch (e) { /* sin almacenamiento */ } }
+  function pndHechos(P) { try { const o = JSON.parse(window.localStorage.getItem(PND_HK) || '{}'); return o.lista === (P.asesorId + '|' + P.datosAl) ? new Set(o.k || []) : new Set(); } catch (e) { return new Set(); } }
+  function pndSetHecho(P, key, on) { try { const s = pndHechos(P); if (on) s.add(key); else s.delete(key); window.localStorage.setItem(PND_HK, JSON.stringify({ lista: P.asesorId + '|' + P.datosAl, k: [...s] })); } catch (e) { /* sin almacenamiento */ } }
   const pndKey = (it) => it.cat + '|' + (it.folio || it.nombre);
   const pndDias = (n) => n == null ? '' : n === 0 ? 'hoy' : n === 1 ? '1 día' : n + ' días';
   function pndVieja(P) { return P && P.datosAl && P.datosAl < S.today; }
@@ -644,10 +665,15 @@
         coment: String(it.coment || '').slice(0, 140), dias: it.dias == null ? null : +it.dias, camp: String(it.camp || ''), intentos: it.intentos == null ? null : +it.intentos,
         motivo: String(it.motivo || ''), accion: String(it.accion || '') }));
       S.raw.pendientes = { datosAl: String(P.datosAl || ''), generado: String(P.generado || ''), archivo: file.name, items };
+      const B = S.raw.pendBase; let esBase = false;
+      if (!B || B.datosAl !== S.raw.pendientes.datosAl) { // primera lista del día = punto de partida para medir el avance
+        S.raw.pendBase = { datosAl: S.raw.pendientes.datosAl, generado: S.raw.pendientes.generado, items: items.map((it) => ({ ase: it.ase, folio: it.folio, nombre: it.nombre })) };
+        await S.store.set('pendBase', S.raw.pendBase); esBase = true;
+      }
       await S.store.set('pendientes', S.raw.pendientes);
       S.cfg.cambiosSinPublicar = true; D.ConfigStore.save(S.cfg);
       const sinAsesor = [...new Set(items.map((it) => it.ase).filter((a) => !S.cfg.asesores[pndAsesorId(a)]))];
-      toast(`Pendientes cargados: ${U.int(items.length)} del ${U.fmtDate(S.raw.pendientes.datosAl)}.` + (sinAsesor.length ? ` Sin asesor registrado: ${sinAsesor.join(', ')}.` : ' Publica para que el equipo los vea.'));
+      toast(`Pendientes cargados: ${U.int(items.length)} del ${U.fmtDate(S.raw.pendientes.datosAl)}` + (esBase ? ' (lista de inicio del día).' : ' · avance actualizado contra la lista de la mañana.') + (sinAsesor.length ? ` Sin asesor registrado: ${sinAsesor.join(', ')}.` : ' Publica para que el equipo los vea.'));
       render();
     } catch (e) { console.error(e); toast('No se pudo leer el archivo de pendientes: ' + e.message); }
   }
@@ -658,24 +684,32 @@
       <div class="small text-muted">Arrastra aquí <b>pendientes_reto_AAAA-MM-DD.json</b> · se genera en el Cockpit → Hoy → «Exportar pendientes para el Reto»</div></label>
       ${P ? `<div class="cardx mt-2"><div class="card-title-x"><span>Pendientes cargados · datos al ${esc(U.fmtDate(P.datosAl))}</span><span>${U.int(P.items.length)}</span></div>
         ${pndVieja(P) ? '<div class="small warn-text mb-2">⚠️ Esta lista no es de hoy: exporta una nueva desde el Cockpit antes de publicar.</div>' : ''}
+        <div class="small text-muted mb-2">${R && R.desde && R.desde !== R.corte ? `Avance medido contra la lista de inicio del día (${esc(pndHora(R.desde))}) · última lista: ${esc(pndHora(R.corte))}. Míralo en <b>Equipo</b>.` : 'Esta es la lista de inicio del día. Para medir el avance, exporta otra desde el Cockpit después de cargar el Funnel actualizado y súbela aquí.'}</div>
         <div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>Asesor</th><th class="text-center">Total</th><th class="text-center">💬</th><th class="text-center">📞</th><th class="text-center">🏁</th><th class="text-center">🔁</th></tr></thead><tbody>${filas}</tbody></table></div>
         <div class="tiny text-muted mt-2">Cada asesor solo recibe sus pendientes (cifrados con su enlace). El equipo solo ve conteos.</div></div>` : ''}`;
   }
   function cPndAviso(id) {
     const P = pndDe(id); if (!P) return '';
     const c = pndCuenta(P); const hechos = pndHechos(P); const rest = P.items.filter((it) => !hechos.has(pndKey(it))).length;
-    if (!c.total) return `<div class="cardx span2 pnd-aviso ok"><div><b>✓ Sin pendientes</b><div class="small text-muted">Tu lista del ${esc(U.fmtDate(P.datosAl))} está vacía. ¡Buen trabajo!</div></div></div>`;
+    if (!c.total) return `<div class="cardx span2 pnd-aviso ok"><div><b>✓ Sin pendientes</b><div class="small text-muted">Tu lista del ${esc(U.fmtDate(P.datosAl))} está vacía${P.avance ? ` · atendiste ${P.avance.atendidos} de ${P.avance.base} desde la mañana` : ''}. ¡Buen trabajo!</div></div></div>`;
     return `<div class="cardx span2 pnd-aviso" role="button" data-nav="pendientes"><div><div class="pnd-big"><span class="num">${rest}</span> pendiente${rest === 1 ? '' : 's'} por atender</div>
+      ${P.avance ? `<div class="small ok-text fw-bold">✅ Hoy llevas ${P.avance.atendidos} de ${P.avance.base} atendidos (${pndPct(P.avance)}%) confirmados en el Funnel</div>` : ''}
       <div class="small text-muted">${c.responder ? `<b>${c.responder}</b> te contestaron y esperan · ` : ''}${c.llamar} llamadas · ${c.cerrar} por cerrar · ${c.seguimiento} seguimientos${pndVieja(P) ? ' · <span class="warn-text">lista del ' + esc(U.fmtDate(P.datosAl)) + '</span>' : ''}</div></div>
       <span class="btn btn-binco btn-sm">Ver mis pendientes →</span></div>`;
   }
   function cPndEquipo() {
     const R = pndResumen(); if (!R || !Object.keys(R.por).length) return '';
-    const rows = Object.entries(R.por).filter(([id]) => S.cfg.asesores[id]).sort((a, b) => b[1].total - a[1].total);
-    return `<div class="cardx mt-3"><div class="card-title-x"><span>Pendientes del día por asesor · datos al ${esc(U.fmtDate(R.datosAl))}</span></div>
-      <div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>Asesor</th><th class="text-center">Total</th><th class="text-center">💬 Contestaron</th><th class="text-center">📞 Llamar</th><th class="text-center">🏁 Por cerrar</th><th class="text-center">🔁 Seguimiento</th></tr></thead>
-      <tbody>${rows.map(([id, c]) => `<tr><td class="fw-bold">${esc(name(id))}</td><td class="num fw-bold text-center">${c.total}</td><td class="num text-center">${c.responder}</td><td class="num text-center">${c.llamar}</td><td class="num text-center">${c.cerrar}</td><td class="num text-center">${c.seguimiento}</td></tr>`).join('')}</tbody></table></div>
-      <div class="tiny text-muted mt-2">Misma lista que «Hoy» en el Cockpit. Se vacía cuando el asesor registra la gestión en el Funnel y se carga la siguiente lista.</div></div>`;
+    const rows = Object.entries(R.por).filter(([id]) => S.cfg.asesores[id]).sort((a, b) => (b[1].av ? b[1].av.base : b[1].total) - (a[1].av ? a[1].av.base : a[1].total));
+    const hayAv = rows.some(([, c]) => c.av);
+    const avCells = (c) => { const a = c.av; if (!a) return '<td class="num text-center text-muted">—</td><td class="num text-center text-muted">—</td><td class="num text-center text-muted">—</td><td class="text-center text-muted">—</td>';
+      const p = pndPct(a); const lvl = p >= 80 ? 'meta' : p >= 50 ? 'cerca' : p >= 25 ? 'avance' : 'inicio';
+      return `<td class="num text-center">${a.base}</td><td class="num text-center fw-bold ok-text">${a.atendidos}</td><td class="num text-center">${a.siguen}${a.nuevos ? ` <span class="tiny text-muted">+${a.nuevos} nuevos</span>` : ''}</td>
+        <td class="text-center" style="min-width:120px"><span class="num fw-bold lvl-${lvl}">${p}%</span><span class="pbar sm mini-bar"><span style="width:${p}%"></span></span></td>`; };
+    return `<div class="cardx mt-3"><div class="card-title-x"><span>Pendientes del día por asesor · datos al ${esc(U.fmtDate(R.datosAl))}</span>${R.desde && R.corte && R.desde !== R.corte ? `<span>Avance ${esc(pndHora(R.desde))} → ${esc(pndHora(R.corte))}</span>` : ''}</div>
+      <div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>Asesor</th><th class="text-center">Al inicio</th><th class="text-center">✅ Atendidos</th><th class="text-center">Siguen</th><th class="text-center">Avance</th>
+        <th class="text-center">Ahora</th><th class="text-center">💬</th><th class="text-center">📞</th><th class="text-center">🏁</th><th class="text-center">🔁</th></tr></thead>
+      <tbody>${rows.map(([id, c]) => `<tr><td class="fw-bold">${esc(name(id))}</td>${avCells(c)}<td class="num fw-bold text-center">${c.total}</td><td class="num text-center">${c.responder}</td><td class="num text-center">${c.llamar}</td><td class="num text-center">${c.cerrar}</td><td class="num text-center">${c.seguimiento}</td></tr>`).join('')}</tbody></table></div>
+      <div class="tiny text-muted mt-2">${hayAv ? '«Atendidos» = estaban en la lista de inicio del día y ya salieron porque el Funnel trae su gestión (no cuenta lo que el asesor solo palomeó). «Nuevos» = entraron a la lista durante el día.' : 'El avance aparece cuando cargas una segunda lista del mismo día (después de subir el Funnel actualizado al Cockpit).'} Íconos: 💬 contestaron · 📞 llamar · 🏁 por cerrar · 🔁 seguimiento.</div></div>`;
   }
   VIEWS.pendientes = {
     html() {
@@ -700,7 +734,8 @@
       return `<div class="cardx">
         <div class="d-flex flex-wrap justify-content-between align-items-end gap-2">
           <div><div class="card-title-x mb-1"><span>Mis pendientes · datos al ${esc(U.fmtDate(P.datosAl))}</span></div>
-            <div class="pnd-big"><span class="num">${rest}</span> de ${c.total} por atender</div></div>
+            <div class="pnd-big"><span class="num">${rest}</span> de ${c.total} por atender</div>
+            ${P.avance ? `<div class="small ok-text fw-bold mt-1">✅ Desde la mañana: ${P.avance.atendidos} de ${P.avance.base} atendidos (${pndPct(P.avance)}%) · confirmados en el Funnel${P.avance.nuevos ? ` · ${P.avance.nuevos} nuevos en la lista` : ''}</div>` : ''}</div>
           <div class="pbar" style="min-width:160px;flex:1;max-width:280px"><span style="width:${c.total ? Math.round((c.total - rest) / c.total * 100) : 0}%"></span></div>
         </div>
         ${pndVieja(P) ? `<div class="alert alert-warning small py-2 mt-2 mb-0">Esta lista es del ${esc(U.fmtDate(P.datosAl))}. Tu supervisor publicará la de hoy; mientras, revisa en el Funnel antes de llamar.</div>` : ''}
