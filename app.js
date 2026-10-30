@@ -653,12 +653,12 @@
   }
   function cPndCarga() {
     const P = S.raw.pendientes; const R = pndResumen();
-    const filas = R ? Object.entries(R.por).sort((a, b) => b[1].total - a[1].total).map(([id, c]) => `<tr><td>${esc(S.cfg.asesores[id] ? name(id) : id + ' (no registrado)')}</td><td class="num fw-bold">${c.total}</td><td class="num">${c.responder}</td><td class="num">${c.llamar}</td><td class="num">${c.cerrar}</td><td class="num">${c.seguimiento}</td></tr>`).join('') : '';
+    const filas = R ? Object.entries(R.por).sort((a, b) => b[1].total - a[1].total).map(([id, c]) => `<tr><td>${esc(S.cfg.asesores[id] ? name(id) : id + ' (no registrado)')}</td><td class="num fw-bold text-center">${c.total}</td><td class="num text-center">${c.responder}</td><td class="num text-center">${c.llamar}</td><td class="num text-center">${c.cerrar}</td><td class="num text-center">${c.seguimiento}</td></tr>`).join('') : '';
     return `<label class="drop d-block mt-3" data-drop="pendientes"><input type="file" accept=".json" hidden data-file="pendientes"><div class="e">📋</div><div class="t">Pendientes del día (Cockpit Comercial)</div>
       <div class="small text-muted">Arrastra aquí <b>pendientes_reto_AAAA-MM-DD.json</b> · se genera en el Cockpit → Hoy → «Exportar pendientes para el Reto»</div></label>
       ${P ? `<div class="cardx mt-2"><div class="card-title-x"><span>Pendientes cargados · datos al ${esc(U.fmtDate(P.datosAl))}</span><span>${U.int(P.items.length)}</span></div>
         ${pndVieja(P) ? '<div class="small warn-text mb-2">⚠️ Esta lista no es de hoy: exporta una nueva desde el Cockpit antes de publicar.</div>' : ''}
-        <div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>Asesor</th><th class="text-end">Total</th><th class="text-end">💬</th><th class="text-end">📞</th><th class="text-end">🏁</th><th class="text-end">🔁</th></tr></thead><tbody>${filas}</tbody></table></div>
+        <div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>Asesor</th><th class="text-center">Total</th><th class="text-center">💬</th><th class="text-center">📞</th><th class="text-center">🏁</th><th class="text-center">🔁</th></tr></thead><tbody>${filas}</tbody></table></div>
         <div class="tiny text-muted mt-2">Cada asesor solo recibe sus pendientes (cifrados con su enlace). El equipo solo ve conteos.</div></div>` : ''}`;
   }
   function cPndAviso(id) {
@@ -673,8 +673,8 @@
     const R = pndResumen(); if (!R || !Object.keys(R.por).length) return '';
     const rows = Object.entries(R.por).filter(([id]) => S.cfg.asesores[id]).sort((a, b) => b[1].total - a[1].total);
     return `<div class="cardx mt-3"><div class="card-title-x"><span>Pendientes del día por asesor · datos al ${esc(U.fmtDate(R.datosAl))}</span></div>
-      <div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>Asesor</th><th class="text-end">Total</th><th class="text-end">💬 Contestaron</th><th class="text-end">📞 Llamar</th><th class="text-end">🏁 Por cerrar</th><th class="text-end">🔁 Seguimiento</th></tr></thead>
-      <tbody>${rows.map(([id, c]) => `<tr><td class="fw-bold">${esc(name(id))}</td><td class="num fw-bold">${c.total}</td><td class="num">${c.responder}</td><td class="num">${c.llamar}</td><td class="num">${c.cerrar}</td><td class="num">${c.seguimiento}</td></tr>`).join('')}</tbody></table></div>
+      <div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>Asesor</th><th class="text-center">Total</th><th class="text-center">💬 Contestaron</th><th class="text-center">📞 Llamar</th><th class="text-center">🏁 Por cerrar</th><th class="text-center">🔁 Seguimiento</th></tr></thead>
+      <tbody>${rows.map(([id, c]) => `<tr><td class="fw-bold">${esc(name(id))}</td><td class="num fw-bold text-center">${c.total}</td><td class="num text-center">${c.responder}</td><td class="num text-center">${c.llamar}</td><td class="num text-center">${c.cerrar}</td><td class="num text-center">${c.seguimiento}</td></tr>`).join('')}</tbody></table></div>
       <div class="tiny text-muted mt-2">Misma lista que «Hoy» en el Cockpit. Se vacía cuando el asesor registra la gestión en el Funnel y se carga la siguiente lista.</div></div>`;
   }
   VIEWS.pendientes = {
