@@ -642,8 +642,8 @@
    * Se calcula con el reporte del CRM (Funnel): por la tarde basta con subir el reporte, sin otra lista de pendientes.
    * Gestionado hoy = su «Fecha última gestión» es hoy, o hoy cambió su etapa / resultado / intentos de llamada.
    * Llamadas = intentos nuevos desde antes de la primera carga del día (o 1 si solo cambió el resultado). */
-  const RES_NOCONT = /no contesta|buzon|apagado|no disponible|fuera de servicio|equivocad|no existe|inexistente|no es el cliente/;
-  const RES_CONT = /titular|contactad|contacto|con interes|sin interes|interesad|otro whats|alterno|agend|cita/;
+  const RES_NOCONT = /no contesta|buzon|sin respuesta|no responde|apagado|no disponible|fuera de servicio|equivocad|no existe|inexistente|no es el cliente/;
+  const RES_CONT = /titular|contactad|contacto|interes|otro whats|alterno|agend|cita|recopilacion|documentacion/;
   function pndListaHoy(id) {
     const hoy = S.today;
     if (S.publication) return S.pnd && S.pnd.asesorId === id && S.pnd.datosAl === hoy ? S.pnd.items : [];
