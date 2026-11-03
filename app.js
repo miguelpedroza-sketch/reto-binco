@@ -155,7 +155,7 @@
 
   function renderNav() {
     const tabs = asesorMode() ? ASESOR_TABS : ADMIN_TABS;
-    const nP = asesorMode() && typeof pndDe === 'function' ? (() => { const P = pndDe(currentAsesor()); if (!P) return 0; const h = pndHechos(P); return P.items.filter((it) => !h.has(pndKey(it))).length; })() : 0;
+    const nP = asesorMode() && typeof pndDe === 'function' ? (() => { const P = pndDe(currentAsesor()); if (!P) return 0; const h = pndHechos(P); const T = trabajoDia(currentAsesor()); const a = T ? T.attKeys : new Set(); return P.items.filter((it) => !h.has(pndKey(it)) && !a.has(pndKey(it))).length; })() : 0;
     const badge = (k) => k === 'pendientes' && nP ? `<span class="nav-badge">${nP > 99 ? '99+' : nP}</span>` : '';
     const html = (cls) => tabs.map(([k, i, l]) => `<button data-nav="${k}" class="${S.view === k ? 'active' : ''}">${cls ? `<span class="i">${i}${badge(k)}</span>` : i + ' '}${l}${cls ? '' : badge(k)}</button>`).join('');
     $('#topNav').innerHTML = html(false);
@@ -635,16 +635,68 @@
    *  «Atendido» = estaba en la lista de la mañana y ya no aparece (el Funnel ya trae su gestión). */
   const pndLead = (it) => it.folio ? 'f:' + it.folio : 'n:' + U.normName(it.nombre);
   function pndAvance(id) {
-    if (S.publication) return (S.pnd && S.pnd.asesorId === id && S.pnd.avance) || null;
+    const T = trabajoDia(id); if (!T || !T.lista.tot) return null;
+    return { base: T.lista.tot, atendidos: T.lista.att, siguen: T.lista.tot - T.lista.att, nuevos: 0, porFunnel: true };
+  }
+  /* ---------- TRABAJO DEL DÍA ----------
+   * Se calcula con el reporte del CRM (Funnel): por la tarde basta con subir el reporte, sin otra lista de pendientes.
+   * Gestionado hoy = su «Fecha última gestión» es hoy, o hoy cambió su etapa / resultado / intentos de llamada.
+   * Llamadas = intentos nuevos desde antes de la primera carga del día (o 1 si solo cambió el resultado). */
+  const RES_NOCONT = /no contesta|buzon|apagado|no disponible|fuera de servicio|equivocad|no existe|inexistente|no es el cliente/;
+  const RES_CONT = /titular|contactad|contacto|con interes|sin interes|interesad|otro whats|alterno|agend|cita/;
+  function pndListaHoy(id) {
+    const hoy = S.today;
+    if (S.publication) return S.pnd && S.pnd.asesorId === id && S.pnd.datosAl === hoy ? S.pnd.items : [];
     const B = S.raw.pendBase, P = S.raw.pendientes;
-    if (!B || !P || B.datosAl !== P.datosAl || B.generado === P.generado) return null;
-    const base = new Set(B.items.filter((it) => pndAsesorId(it.ase) === id).map(pndLead));
-    const ahora = new Set(P.items.filter((it) => pndAsesorId(it.ase) === id).map(pndLead));
-    if (!base.size && !ahora.size) return null;
-    let atendidos = 0, siguen = 0, nuevos = 0;
-    base.forEach((k) => { if (ahora.has(k)) siguen++; else atendidos++; });
-    ahora.forEach((k) => { if (!base.has(k)) nuevos++; });
-    return { desde: B.generado, corte: P.generado, base: base.size, atendidos, siguen, nuevos };
+    const L = B && B.datosAl === hoy && B.items.length && B.items[0].cat ? B : (P && P.datosAl === hoy ? P : null);
+    return L ? L.items.filter((it) => pndAsesorId(it.ase) === id) : [];
+  }
+  function trabajoDia(id) {
+    if (!S.ds || !S.ds.funnel) return null;
+    const hoy = S.today, idx = D.STAGE_IDX;
+    const rows = S.ds.funnel.filter((f) => f.asesorId === id);
+    const porFolio = new Map(), porNom = new Map();
+    rows.forEach((f) => { if (f.leadId) porFolio.set(String(f.leadId), f); if (f.nombreNorm) porNom.set(U.nameKey(f.nombreNorm), f); });
+    const det = (f) => {
+      const d0 = f.dia && f.dia.d === hoy && !f.dia.nuevo ? f.dia : null, nuevoHoy = !!(f.dia && f.dia.d === hoy && f.dia.nuevo);
+      const res = U.norm(f.resLlam || '');
+      let llam = 0;
+      if (d0) { const di = (f.intLlam || 0) - (d0.i || 0); llam = di > 0 ? di : (f.resLlam && f.resLlam !== d0.r ? 1 : 0); }
+      else if (f.fUlt === hoy && f.resLlam) llam = nuevoHoy && f.intLlam ? f.intLlam : 1;
+      const av = d0 && idx[f.etapa] != null && idx[d0.e] != null && idx[f.etapa] > idx[d0.e];
+      const cambio = d0 && (f.etapa !== d0.e || (f.gestiones || 0) > (d0.g || 0));
+      const hecho = f.fUlt === hoy || llam > 0 || av || !!cambio;
+      const cont = llam > 0 && res && RES_CONT.test(res) && !RES_NOCONT.test(res);
+      return { f, d0, llam, av, cont, hecho };
+    };
+    const D2 = rows.map(det), byKey = new Map(D2.map((x) => [x.f.key, x]));
+    const lista = pndListaHoy(id), porCat = {}, attKeys = new Set(), enLista = new Set();
+    lista.forEach((it) => {
+      const f = (it.folio && porFolio.get(String(it.folio))) || porNom.get(U.nameKey(U.normName(it.nombre)));
+      const x = f && byKey.get(f.key); const c = porCat[it.cat] || (porCat[it.cat] = { t: 0, a: 0 });
+      c.t++; if (f) enLista.add(f.key);
+      if (x && x.hecho) { c.a++; attKeys.add(pndKey(it)); }
+    });
+    const hechos = D2.filter((x) => x.hecho);
+    const items = hechos.map((x) => { const it = lista.find((y) => (y.folio && String(y.folio) === String(x.f.leadId))); return {
+      folio: x.f.leadId || '', nombre: x.f.nombre || '', etapaAntes: x.d0 ? x.d0.e : null, etapa: x.f.etapa, llam: x.llam, cont: x.cont, av: x.av,
+      res: x.f.resLlam || '', coment: x.f.coment || '', cat: it ? it.cat : null }; })
+      .sort((a, b) => (b.av - a.av) || (b.llam - a.llam) || String(a.nombre).localeCompare(String(b.nombre)));
+    return { fecha: hoy, gest: hechos.length, llam: hechos.reduce((t, x) => t + x.llam, 0), cont: hechos.filter((x) => x.cont).length, av: hechos.filter((x) => x.av).length,
+      fuera: hechos.filter((x) => !enLista.has(x.f.key)).length, lista: { tot: lista.length, att: attKeys.size, porCat }, attKeys, items,
+      conLlamadas: rows.some((f) => f.intLlam != null || f.resLlam) };
+  }
+  const STG_LBL = (k) => (D.STAGE_LABEL && D.STAGE_LABEL[k]) || k || '—';
+  function trabajoDetalle(id) {
+    const T = trabajoDia(id); if (!T) return;
+    const CAT = { responder: '💬', llamar: '📞', cerrar: '🏁', seguimiento: '🔁' };
+    const body = `<div class="small text-muted mb-2">Lo que registró en el Funnel el ${esc(U.fmtDate(T.fecha))}: ${T.gest} leads gestionados · ${T.llam} llamadas · ${T.cont} contacto${T.cont === 1 ? '' : 's'} · ${T.av} ${T.av === 1 ? 'avanzó' : 'avanzaron'} de etapa · ${T.fuera} fuera de su lista.</div>
+      ${T.items.length ? `<div class="table-responsive"><table class="table table-sm small align-middle mb-0"><thead><tr><th>Cliente</th><th>Folio</th><th class="text-center">Lista</th><th>Etapa</th><th class="text-center">Llamadas</th><th>Resultado de llamada</th><th>Último comentario</th></tr></thead><tbody>
+      ${T.items.map((x) => `<tr><td class="fw-bold">${esc(x.nombre)}</td><td>${esc(x.folio)}</td><td class="text-center">${x.cat ? CAT[x.cat] || '•' : '<span class="text-muted">fuera</span>'}</td>
+        <td>${x.av ? `${esc(STG_LBL(x.etapaAntes))} → <b class="ok-text">${esc(STG_LBL(x.etapa))}</b>` : esc(STG_LBL(x.etapa))}</td><td class="text-center">${x.llam || ''}</td><td>${esc(x.res)}${x.cont ? ' <span class="ok-text">✓</span>' : ''}</td><td class="text-muted" style="max-width:260px;white-space:normal">${esc(x.coment)}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="text-muted small py-3 text-center">Sin gestiones registradas hoy en el Funnel.</div>'}
+      <div class="tiny text-muted mt-2">Fuente: reporte del CRM. Cuenta como gestionado si su «Fecha última gestión» es hoy o si hoy cambió su etapa, resultado o intentos de llamada.</div>`;
+    openModal(name(id) + ' · trabajo del día', body, '<button class="btn btn-light" data-bs-dismiss="modal">Cerrar</button>');
   }
   const pndPct = (a) => a && a.base ? Math.round(a.atendidos / a.base * 100) : 0;
   const pndHora = (iso) => { try { return new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } };
@@ -667,7 +719,7 @@
         coment: String(it.coment || '').slice(0, 140), dias: it.dias == null ? null : +it.dias, camp: String(it.camp || ''), intentos: it.intentos == null ? null : +it.intentos,
         motivo: String(it.motivo || ''), accion: String(it.accion || '') }));
       const nueva = { datosAl: String(P.datosAl || ''), generado: String(P.generado || ''), archivo: file.name, items };
-      const baseDe = (L) => ({ datosAl: L.datosAl, generado: L.generado, items: L.items.map((it) => ({ ase: it.ase, folio: it.folio, nombre: it.nombre })) });
+      const baseDe = (L) => ({ datosAl: L.datosAl, generado: L.generado, items: L.items });
       const prev = S.raw.pendientes, B0 = S.raw.pendBase;
       // Una lista MÁS VIEJA del mismo día (p. ej. la de la mañana subida otra vez) solo sirve como punto de partida:
       // no reemplaza la lista vigente.
@@ -697,43 +749,47 @@
       <div class="small text-muted">Arrastra aquí <b>pendientes_reto_AAAA-MM-DD.json</b> · se genera en el Cockpit → Hoy → «Exportar pendientes para el Reto»</div></label>
       ${P ? `<div class="cardx mt-2"><div class="card-title-x"><span>Pendientes cargados · datos al ${esc(U.fmtDate(P.datosAl))}</span><span>${U.int(P.items.length)}</span></div>
         ${pndVieja(P) ? '<div class="small warn-text mb-2">⚠️ Esta lista no es de hoy: exporta una nueva desde el Cockpit antes de publicar.</div>' : ''}
-        <div class="small text-muted mb-2">${R && R.desde && R.desde !== R.corte ? `Avance medido contra la lista de inicio del día (${esc(pndHora(R.desde))}) · última lista: ${esc(pndHora(R.corte))}. Míralo en <b>Equipo</b>.` : 'Esta es la lista de inicio del día. Para medir el avance, exporta otra desde el Cockpit después de cargar el Funnel actualizado y súbela aquí. ¿Ya tenías una lista de más temprano? Súbela aquí también y se usará como inicio del día.'}</div>
+        <div class="small text-muted mb-2">Lista del día cargada. Para ver el avance en la tarde <b>solo sube el reporte del CRM</b> (Funnel) arriba y publica: el Reto revisa qué leads de esta lista ya tienen gestión de hoy. Míralo en <b>Equipo → Trabajo del día</b>.</div>
         <div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>Asesor</th><th class="text-center">Total</th><th class="text-center">💬</th><th class="text-center">📞</th><th class="text-center">🏁</th><th class="text-center">🔁</th></tr></thead><tbody>${filas}</tbody></table></div>
         <div class="tiny text-muted mt-2">Cada asesor solo recibe sus pendientes (cifrados con su enlace). El equipo solo ve conteos.</div></div>` : ''}`;
   }
   function cPndAviso(id) {
-    const P = pndDe(id); if (!P) return '';
-    const c = pndCuenta(P); const hechos = pndHechos(P); const rest = P.items.filter((it) => !hechos.has(pndKey(it))).length;
-    if (!c.total) return `<div class="cardx span2 pnd-aviso ok"><div><b>✓ Sin pendientes</b><div class="small text-muted">Tu lista del ${esc(U.fmtDate(P.datosAl))} está vacía${P.avance ? ` · atendiste ${P.avance.atendidos} de ${P.avance.base} desde la mañana` : ''}. ¡Buen trabajo!</div></div></div>`;
+    const P = pndDe(id); if (!P) return ''; const AV = pndAvance(id);
+    const c = pndCuenta(P); const hechos = pndHechos(P); const TD = trabajoDia(id); const att = TD ? TD.attKeys : new Set(); const rest = P.items.filter((it) => !hechos.has(pndKey(it)) && !att.has(pndKey(it))).length;
+    if (!c.total) return `<div class="cardx span2 pnd-aviso ok"><div><b>✓ Sin pendientes</b><div class="small text-muted">Tu lista del ${esc(U.fmtDate(P.datosAl))} está vacía${AV ? ` · atendiste ${AV.atendidos} de ${AV.base} desde la mañana` : ''}. ¡Buen trabajo!</div></div></div>`;
     return `<div class="cardx span2 pnd-aviso" role="button" data-nav="pendientes"><div><div class="pnd-big"><span class="num">${rest}</span> pendiente${rest === 1 ? '' : 's'} por atender</div>
-      ${P.avance ? `<div class="small ok-text fw-bold">✅ Hoy llevas ${P.avance.atendidos} de ${P.avance.base} atendidos (${pndPct(P.avance)}%) confirmados en el Funnel</div>` : ''}
+      ${AV ? `<div class="small ok-text fw-bold">✅ Hoy llevas ${AV.atendidos} de ${AV.base} atendidos (${pndPct(AV)}%) confirmados en el Funnel</div>` : ''}
       <div class="small text-muted">${c.responder ? `<b>${c.responder}</b> te contestaron y esperan · ` : ''}${c.llamar} llamadas · ${c.cerrar} por cerrar · ${c.seguimiento} seguimientos${pndVieja(P) ? ' · <span class="warn-text">lista del ' + esc(U.fmtDate(P.datosAl)) + '</span>' : ''}</div></div>
       <span class="btn btn-binco btn-sm">Ver mis pendientes →</span></div>`;
   }
   function cPndEquipo() {
-    const R = pndResumen(); if (!R || !Object.keys(R.por).length) return '';
-    const rows = Object.entries(R.por).filter(([id]) => S.cfg.asesores[id]).sort((a, b) => (b[1].av ? b[1].av.base : b[1].total) - (a[1].av ? a[1].av.base : a[1].total));
-    const hayAv = rows.some(([, c]) => c.av);
-    const avCells = (c) => { const a = c.av; if (!a) return '<td class="num text-center text-muted">—</td><td class="num text-center text-muted">—</td><td class="num text-center text-muted">—</td><td class="text-center text-muted">—</td>';
-      const p = pndPct(a); const lvl = p >= 80 ? 'meta' : p >= 50 ? 'cerca' : p >= 25 ? 'avance' : 'inicio';
-      return `<td class="num text-center">${a.base}</td><td class="num text-center fw-bold ok-text">${a.atendidos}</td><td class="num text-center">${a.siguen}${a.nuevos ? ` <span class="tiny text-muted">+${a.nuevos} nuevos</span>` : ''}</td>
-        <td class="text-center" style="min-width:120px"><span class="num fw-bold lvl-${lvl}">${p}%</span><span class="pbar sm mini-bar"><span style="width:${p}%"></span></span></td>`; };
-    return `<div class="cardx mt-3"><div class="card-title-x"><span>Pendientes del día por asesor · datos al ${esc(U.fmtDate(R.datosAl))}</span>${R.desde && R.corte && R.desde !== R.corte ? `<span>Avance ${esc(pndHora(R.desde))} → ${esc(pndHora(R.corte))}</span>` : ''}</div>
-      <div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>Asesor</th><th class="text-center">Al inicio</th><th class="text-center">✅ Atendidos</th><th class="text-center">Siguen</th><th class="text-center">Avance</th>
-        <th class="text-center">Ahora</th><th class="text-center">💬</th><th class="text-center">📞</th><th class="text-center">🏁</th><th class="text-center">🔁</th></tr></thead>
-      <tbody>${rows.map(([id, c]) => `<tr><td class="fw-bold">${esc(name(id))}</td>${avCells(c)}<td class="num fw-bold text-center">${c.total}</td><td class="num text-center">${c.responder}</td><td class="num text-center">${c.llamar}</td><td class="num text-center">${c.cerrar}</td><td class="num text-center">${c.seguimiento}</td></tr>`).join('')}</tbody></table></div>
-      <div class="tiny text-muted mt-2">${hayAv ? '«Atendidos» = estaban en la lista de inicio del día y ya salieron porque el Funnel trae su gestión (no cuenta lo que el asesor solo palomeó). «Nuevos» = entraron a la lista durante el día.' : 'El avance aparece cuando hay dos listas del mismo día. Si tienes la lista de la mañana, súbela en Cargar datos: se usa como inicio del día sin reemplazar la actual.'} Íconos: 💬 contestaron · 📞 llamar · 🏁 por cerrar · 🔁 seguimiento.</div></div>`;
+    const ids = activeIds().filter((id) => id !== 'SIN ASESOR');
+    const T = ids.map((id) => [id, trabajoDia(id)]).filter(([, t]) => t && (t.gest || t.lista.tot));
+    if (!T.length) return '';
+    const P = S.raw.pendientes, hoy = S.today, conLista = T.some(([, t]) => t.lista.tot), conLl = T.some(([, t]) => t.conLlamadas);
+    const frac = (c) => c && c.t ? `<span class="num">${c.a}</span><span class="text-muted"> / ${c.t}</span>` : '<span class="text-muted">—</span>';
+    const pctCell = (t) => { if (!t.lista.tot) return '<td class="text-center text-muted">—</td>'; const p = Math.round(t.lista.att / t.lista.tot * 100), lvl = p >= 80 ? 'meta' : p >= 50 ? 'cerca' : p >= 25 ? 'avance' : 'inicio';
+      return `<td class="text-center" style="min-width:130px"><span class="num fw-bold lvl-${lvl}">${t.lista.att} de ${t.lista.tot} · ${p}%</span><span class="pbar sm mini-bar"><span style="width:${p}%"></span></span></td>`; };
+    const llCell = (t) => { const c = t.lista.porCat.llamar; return `<td class="text-center"><span class="num fw-bold">${t.llam}</span>${c && c.t ? `<span class="text-muted"> / ${c.t}</span>` : ''}${t.cont ? `<div class="tiny ok-text">${t.cont} contacto${t.cont === 1 ? '' : 's'}</div>` : ''}</td>`; };
+    return `<div class="cardx mt-3"><div class="card-title-x"><span>Trabajo del día por asesor · ${esc(U.fmtDate(hoy))}</span><span>Toca una fila para ver el detalle</span></div>
+      <div class="table-responsive"><table class="table table-sm small align-middle mb-0"><thead><tr><th>Asesor</th><th class="text-center">Su lista de hoy</th><th class="text-center">💬 Respuestas</th><th class="text-center">📞 Llamadas / cuota</th><th class="text-center">🏁 Por cerrar</th><th class="text-center">🔁 Seguimiento</th>
+        <th class="text-center">Gestiones hoy</th><th class="text-center">⬆️ Avanzaron</th><th class="text-center">Fuera de lista</th></tr></thead>
+      <tbody>${T.map(([id, t]) => `<tr data-trab="${esc(id)}" style="cursor:pointer"><td class="fw-bold">${esc(name(id))}</td>${pctCell(t)}<td class="text-center">${frac(t.lista.porCat.responder)}</td>${llCell(t)}<td class="text-center">${frac(t.lista.porCat.cerrar)}</td><td class="text-center">${frac(t.lista.porCat.seguimiento)}</td>
+        <td class="text-center num fw-bold">${t.gest}</td><td class="text-center num ${t.av ? 'ok-text fw-bold' : ''}">${t.av}</td><td class="text-center num">${t.fuera}</td></tr>`).join('')}</tbody></table></div>
+      <div class="tiny text-muted mt-2">Se calcula con el reporte del CRM: súbelo en la tarde (no hace falta otra lista de pendientes) y verás lo que avanzó cada quien. «Su lista de hoy» = pendientes de la mañana que ya tienen gestión de hoy en el Funnel. Llamadas = intentos nuevos registrados hoy (no se ven afectadas por la cuota que se rellena).${!conLista ? ' Aún no hay lista de pendientes de hoy: súbela en Cargar datos para ver las columnas de la lista.' : ''}${!conLl ? ' <b>El reporte no trae «Resultado de llamada» ni «Intentos de llamada»</b>: revisa en Cargar datos que esas columnas estén relacionadas.' : ''}${P && P.datosAl !== hoy ? ' La lista cargada es del ' + esc(U.fmtDate(P.datosAl)) + '.' : ''}</div></div>`;
   }
+  document.addEventListener('click', (e) => { const r = e.target.closest('[data-trab]'); if (r) trabajoDetalle(r.dataset.trab); });
   VIEWS.pendientes = {
     html() {
       const id = currentAsesor(); const P = pndDe(id);
       if (!P) return `<div class="cardx empty"><div class="e">📋</div><h2 class="h5 fw-bold mt-2">Aún no hay pendientes publicados</h2><p class="mb-0">Tu supervisor los publica cada mañana junto con tu avance.</p></div>`;
-      const c = pndCuenta(P); const hechos = pndHechos(P);
+      const c = pndCuenta(P); const hechos = pndHechos(P); const TD = trabajoDia(id); const AV = pndAvance(id); const att = TD ? TD.attKeys : new Set();
+      const listo = (it) => hechos.has(pndKey(it)) || att.has(pndKey(it));
       const cat = S.pndCat && c[S.pndCat] ? S.pndCat : (PND_CATS.find((x) => c[x[0]]) || PND_CATS[0])[0];
       const meta = PND_CATS[PND_CAT_IDX[cat]];
-      const list = P.items.filter((it) => it.cat === cat).sort((a, b) => (hechos.has(pndKey(a)) - hechos.has(pndKey(b))) || a.ord - b.ord);
-      const card = (it) => { const h = hechos.has(pndKey(it)); const k = pndKey(it);
-        return `<div class="pnd-item${h ? ' done' : ''}">
+      const list = P.items.filter((it) => it.cat === cat).sort((a, b) => (listo(a) - listo(b)) || a.ord - b.ord);
+      const card = (it) => { const h = hechos.has(pndKey(it)); const k = pndKey(it); const fx = att.has(k);
+        return `<div class="pnd-item${h || fx ? ' done' : ''}">${fx ? '<div class="tiny ok-text mb-1">✅ Gestionado hoy en el Funnel</div>' : ''}
           <div class="pnd-top"><div class="pnd-name">${esc(it.nombre || '(sin nombre)')}${it.llantas ? ' <span class="pnd-tag">Llantas</span>' : ''}</div>${it.dias != null ? `<span class="pnd-dias${it.dias >= 3 ? ' alto' : ''}">${pndDias(it.dias)}</span>` : ''}</div>
           <div class="pnd-mot">${esc(it.motivo)}${it.etapa ? ' · ' + esc(it.etapa) : ''}${it.monto ? ' · ' + U.money(it.monto) : ''}</div>
           <div class="pnd-acc">👉 ${esc(it.accion)}</div>
@@ -743,12 +799,13 @@
             ${it.tels.map((t) => `<a class="btn btn-sm btn-light" href="tel:${esc(t.replace(/[^\d+]/g, ''))}">📞 ${esc(t)}</a>`).join('')}
             <label class="pnd-chk"><input type="checkbox" data-pnd-hecho="${esc(k)}" ${h ? 'checked' : ''}> Ya lo gestioné</label>
           </div></div>`; };
-      const rest = P.items.filter((it) => !hechos.has(pndKey(it))).length;
+      const rest = P.items.filter((it) => !listo(it)).length;
       return `<div class="cardx">
         <div class="d-flex flex-wrap justify-content-between align-items-end gap-2">
           <div><div class="card-title-x mb-1"><span>Mis pendientes · datos al ${esc(U.fmtDate(P.datosAl))}</span></div>
             <div class="pnd-big"><span class="num">${rest}</span> de ${c.total} por atender</div>
-            ${P.avance ? `<div class="small ok-text fw-bold mt-1">✅ Desde la mañana: ${P.avance.atendidos} de ${P.avance.base} atendidos (${pndPct(P.avance)}%) · confirmados en el Funnel${P.avance.nuevos ? ` · ${P.avance.nuevos} nuevos en la lista` : ''}</div>` : ''}</div>
+            ${AV ? `<div class="small ok-text fw-bold mt-1">✅ De tu lista de hoy: ${AV.atendidos} de ${AV.base} gestionados en el Funnel (${pndPct(AV)}%)</div>` : ''}
+            ${TD && TD.gest ? `<div class="small text-muted">Hoy en el Funnel: ${TD.gest} leads gestionados · ${TD.llam} llamadas · ${TD.cont} contacto${TD.cont === 1 ? '' : 's'} · ${TD.av} ${TD.av === 1 ? 'avanzó' : 'avanzaron'} de etapa</div>` : ''}</div>
           <div class="pbar" style="min-width:160px;flex:1;max-width:280px"><span style="width:${c.total ? Math.round((c.total - rest) / c.total * 100) : 0}%"></span></div>
         </div>
         ${pndVieja(P) ? `<div class="alert alert-warning small py-2 mt-2 mb-0">Esta lista es del ${esc(U.fmtDate(P.datosAl))}. Tu supervisor publicará la de hoy; mientras, revisa en el Funnel antes de llamar.</div>` : ''}

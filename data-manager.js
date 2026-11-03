@@ -230,6 +230,9 @@
       { key: 'fechaContacto', label: 'Fecha de contacto', syn: ['fecha contacto', 'fecha primer contacto', 'fecha de contacto', 'fecha contacto efectivo'] },
       { key: 'contactado', label: 'Contactado (Sí/No)', syn: ['contactado', 'contacto efectivo', 'contactable', 'resultado contacto', 'contacto', 'resultado llamada'] },
       { key: 'gestiones', label: 'Número de gestiones', syn: ['gestiones', 'numero gestiones', 'no gestiones', 'intentos', 'llamadas', 'actividades', 'numero de gestiones', 'total gestiones'] },
+      { key: 'resultadoLlamada', label: 'Resultado de llamada', syn: ['resultado de llamada', 'resultado de la llamada', 'resultado llamada ultima', 'ultimo resultado de llamada'] },
+      { key: 'intentosLlamada', label: 'Intentos de llamada', syn: ['intentos de llamada', 'intentos llamada', 'numero de llamadas', 'no de llamadas'] },
+      { key: 'comentario', label: 'Último comentario', syn: ['ultimo comentario', 'comentario', 'comentarios', 'observaciones', 'ultima nota'] },
       { key: 'fechaExpediente', label: 'Fecha expediente', syn: ['fecha expediente', 'fecha documentacion', 'fecha de expediente'] },
       { key: 'fechaMesa', label: 'Fecha envío a Mesa', syn: ['fecha mesa', 'fecha envio mesa', 'fecha mesa control', 'fecha envio a mesa', 'fecha mesa de control'] },
       { key: 'fechaColocacion', label: 'Fecha de colocación / dispersión', syn: ['fecha colocacion', 'fecha de colocacion', 'fecha dispersion', 'fecha de dispersion', 'fecha desembolso', 'fecha colocado', 'fecha de credito'] },
@@ -354,6 +357,9 @@
       fColoc: U.parseDate(g('fechaColocacion')),
       fColocReporte: U.parseDate(g('fechaColocacion')), // fecha de colocación del Funnel (se captura al autorizar)
       proximaAccion: String(g('proximaAccion') || '').trim().slice(0, 140),
+      resLlam: String(g('resultadoLlamada') == null ? '' : g('resultadoLlamada')).trim().slice(0, 80),
+      intLlam: g('intentosLlamada') == null || String(g('intentosLlamada')).trim() === '' ? null : (Number(g('intentosLlamada')) || 0),
+      coment: String(g('comentario') == null ? '' : g('comentario')).trim().slice(0, 160),
     };
     if (!rec.fAsig) rec.fAsig = rec.fUlt || rec.fContacto;
     rec.key = funnelKey(rec);
@@ -502,6 +508,7 @@
         r.historial = [{ etapa: r.etapa, fecha: stamp }];
         if (COMO_COLOCADO.includes(r.etapa) && !r.fColoc) r.fColoc = r.fUlt || fechaCorte; // se congela: no se moverá si después cambia la última gestión
         r.cargaId = cargaId; r.primeraCarga = cargaId;
+        r.dia = { d: fechaCorte, nuevo: 1 }; // para el trabajo del día: no había foto anterior
         map.set(r.key, r); nuevos++;
       } else {
         const hist = (prev.historial || []).slice();
@@ -525,6 +532,9 @@
           fContacto: r.fContacto || prev.fContacto,
           fExp: r.fExp || prev.fExp, fMesa: r.fMesa || prev.fMesa, fAut: r.fAut || prev.fAut, fColoc: r.fColoc || prev.fColoc || null, fColocReporte: r.fColocReporte || prev.fColocReporte || null,
           monto: r.monto || prev.monto,
+          // Foto del lead ANTES de la primera carga del día: contra ella se mide lo que se trabajó hoy
+          // (llamadas nuevas, cambio de resultado, cambio de etapa). Las cargas siguientes del mismo día la conservan.
+          dia: prev.dia && prev.dia.d === fechaCorte ? prev.dia : { d: fechaCorte, g: prev.gestiones == null ? null : prev.gestiones, i: prev.intLlam == null ? null : prev.intLlam, r: prev.resLlam || '', e: prev.etapa },
         });
         map.set(r.key, merged); actualizados++;
       }
