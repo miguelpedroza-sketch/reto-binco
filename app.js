@@ -217,6 +217,8 @@
    * RENDER PRINCIPAL
    * ---------------------------------------------------------------- */
   function render() {
+    // La app puede quedar abierta varios días (pestaña o app instalada): la fecha de hoy se actualiza en cada vista.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(qs.get('hoy') || '')) { const t = U.today(); if (t !== S.today) S.today = t; }
     Object.values(S.charts).forEach((c) => c && c.destroy && c.destroy()); S.charts = {};
     header(); renderNav();
     const v = $('#view');
