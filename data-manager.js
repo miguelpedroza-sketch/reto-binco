@@ -1106,14 +1106,14 @@
     const pctContactacion = trabajados.length ? (contactados.length / trabajados.length) * 100 : null;
 
     // --- Eventos del periodo (para retos, puntos y racha)
-    const ev = { contactos: 0, intereses: 0, expedientes: 0, mesa: 0, autorizados: 0 };
+    const ev = { contactos: 0, intereses: 0, expedientes: 0, mesa: 0, autorizados: 0, autorizadosVig: 0 };
     fAll.forEach((f) => {
       const r = reachedIdx(f);
       if (r >= SI('contactado') && isContacted(f) && U.inRange(stageDate(f, 'contactado'), range)) ev.contactos++;
       if (r >= SI('interes') && U.inRange(stageDate(f, 'interes'), range)) ev.intereses++;
       if (r >= SI('expediente') && U.inRange(stageDate(f, 'expediente'), range)) ev.expedientes++;
       if (r >= SI('mesa') && U.inRange(stageDate(f, 'mesa'), range)) ev.mesa++;
-      if (r >= SI('autorizado') && U.inRange(stageDate(f, 'autorizado'), range)) ev.autorizados++;
+      if (r >= SI('autorizado') && U.inRange(stageDate(f, 'autorizado'), range)) { ev.autorizados++; if (f.etapaEf !== 'perdido') ev.autorizadosVig++; } // vigentes: si Mesa lo cancela después, ya no cuenta
     });
     ev.colocados = creditos;
 

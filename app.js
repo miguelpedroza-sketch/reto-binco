@@ -853,12 +853,52 @@
     after() { const id = currentAsesor(); drawEvolucion([id], compute([id])); },
   };
   VIEWS.cierres = { html() { if (!hasData()) return emptyState(); return cCierres([currentAsesor()], 30, true); } };
+  /* ---------- GANADORES DE RETOS ---------- */
+  const ganStatus = (x) => x.gana ? (x.definitivo ? '<span class="status-pill st-ganado">🏆 Ganó</span>' : '<span class="status-pill st-ganado">🏆 Lo logró · reto en curso</span>')
+    : x.superado ? '<span class="status-pill st-concluido">Superado por un nivel más alto</span>'
+    : x.definitivo ? '<span class="status-pill st-concluido">No lo alcanzó</span>' : x.e.status === 'proximo' ? '<span class="status-pill st-proximo">Próximo</span>' : '<span class="status-pill st-en_curso">En curso</span>';
+  function cGanadoresAdm() {
+    const G2 = G.ganadores(S.ds, S.cfg, S.today).filter((x) => x.e.status !== 'proximo' || true);
+    if (!G2.length) return '';
+    const grupos = new Map(); // serie o reto
+    G2.sort((a, b) => b.reto.inicio.localeCompare(a.reto.inicio) || Number(a.reto.meta) - Number(b.reto.meta)).forEach((x) => { const k = x.reto.serie || x.reto.id; if (!grupos.has(k)) grupos.set(k, []); grupos.get(k).push(x); });
+    const blk = [...grupos.entries()].map(([k, L]) => {
+      const r0 = L[0].reto, serie = !!r0.serie;
+      const ases = [...new Set(L.map((x) => x.asesorId || '__equipo'))];
+      const filas = ases.map((a) => {
+        const mios = L.filter((x) => (x.asesorId || '__equipo') === a);
+        const gan = mios.find((x) => x.gana), top = mios.slice().sort((p, q) => Number(q.reto.meta) - Number(p.reto.meta))[0];
+        const val = mios[0].e.valorFmt;
+        const prem = gan && gan.e.premio ? esc(gan.e.premio.emoji + ' ' + gan.e.premio.nombre) : '—';
+        const nivel = gan ? esc(gan.reto.nombre) : '—';
+        const sig = !gan || gan !== top ? (() => { const nx = mios.filter((x) => !x.e.cumplido).sort((p, q) => Number(p.reto.meta) - Number(q.reto.meta))[0]; return nx ? `faltan ${nx.e.faltanteFmt} para «${esc(nx.reto.nombre)}»` : ''; })() : 'nivel máximo';
+        return `<tr><td class="fw-bold">${a === '__equipo' ? '👥 Equipo' : esc(name(a))}</td><td class="text-center num fw-bold">${val}</td><td>${gan ? ganStatus(gan) : ganStatus(top)}</td><td>${serie ? nivel : ''}</td><td>${prem}</td><td class="tiny text-muted">${sig}</td></tr>`;
+      }).join('');
+      const st = G.retoStatus(r0, S.today);
+      return `<div class="mt-3"><div class="fw-bold">${esc(serie ? r0.serie : r0.nombre)} <span class="tiny text-muted fw-normal">· ${U.fmtDateShort(r0.inicio)} – ${U.fmtDate(r0.fin)} · ${esc((G.INDICADORES[r0.indicador] || {}).label || '')}${serie ? ' · niveles: ' + L.filter((x, i, A) => A.findIndex((y) => y.reto.id === x.reto.id) === i).map((x) => G.fmtInd(x.reto.indicador, x.reto.meta)).join(' / ') : ' · meta ' + G.fmtInd(r0.indicador, r0.meta)}</span>
+        <span class="status-pill st-${st} ms-1">${{ en_curso: 'En curso', proximo: 'Próximo', concluido: 'Concluido' }[st] || st}</span></div>
+        <div class="table-responsive"><table class="table table-sm small align-middle mb-0"><thead><tr><th>Asesor</th><th class="text-center">Lleva</th><th>Resultado</th><th>${serie ? 'Nivel ganado' : ''}</th><th>Premio</th><th></th></tr></thead><tbody>${filas}</tbody></table></div></div>`;
+    }).join('');
+    return `<div class="cardx"><div class="card-title-x"><span>🏆 Ganadores de retos</span></div>${blk}
+      <div class="tiny text-muted mt-2">«Lo logró · reto en curso» = ya alcanzó la meta pero el reto no ha terminado (puede subir de nivel). El premio se confirma al concluir el reto.</div></div>`;
+  }
+  function cMisGanados(id) {
+    const ALL = G.ganadores(S.ds, S.cfg, S.today);
+    const hayMas = (x) => !!x.reto.serie && ALL.some((y) => y.reto.serie === x.reto.serie && y.asesorId === x.asesorId && Number(y.reto.meta) > Number(x.reto.meta));
+    const L = ALL.filter((x) => x.gana && (x.grupal || x.asesorId === id) && G.isParticipant(x.reto, id))
+      .sort((a, b) => b.reto.fin.localeCompare(a.reto.fin));
+    return `<div class="cardx mt-3"><div class="card-title-x"><span>🏅 Mis retos ganados</span><span>${L.length}</span></div>
+      ${L.length ? L.map((x) => `<div class="reto-prize mb-2"><span class="emo">${esc(x.e.premio ? x.e.premio.emoji : '🏆')}</span><div><div class="t">${esc(x.reto.serie ? x.reto.serie + ' · ' + x.reto.nombre : x.reto.nombre)}${x.grupal ? ' <span class="tiny text-muted">(equipo)</span>' : ''}</div>
+        <div class="small">${x.e.premio ? esc(x.e.premio.nombre) + (x.e.premio.descripcion ? ' — ' + esc(x.e.premio.descripcion) : '') : 'Sin premio asignado'}</div>
+        <div class="tiny text-muted">${U.fmtDateShort(x.reto.inicio)} – ${U.fmtDate(x.reto.fin)} · lograste ${x.e.valorFmt} de ${x.e.metaFmt}${x.definitivo ? '' : hayMas(x) ? ' · <b>el reto sigue en curso</b>: aún puedes subir de nivel' : ' · <b>¡nivel máximo!</b> El premio se confirma al cerrar el reto'}</div></div></div>`).join('') : '<div class="text-muted small">Aún no has ganado retos. ¡El siguiente puede ser tuyo!</div>'}</div>`;
+  }
   VIEWS.retos = {
     html() {
       const id = currentAsesor();
       const retos = G.retosAsesor(S.ds, S.cfg, id, S.today);
       return `<div class="grid g2">${cRetoDia(id) || ''}${cPuntos(id)}</div>
         <div class="cardx mt-3"><div class="card-title-x"><span>Retos de la semana</span><span>🏆</span></div>${retos.length ? retos.map((e) => cReto(e)).join('') : '<div class="text-muted small">No hay retos activos en este momento.</div>'}</div>
+        ${cMisGanados(id)}
         <div class="mt-3">${cLogros(id)}</div>
         <div class="mt-3">${cPremios()}</div>`;
     },
@@ -1142,6 +1182,7 @@
         <div class="col-5 col-md-2"><label class="form-label small">Meta del día</label><input type="number" class="form-control" id="rdMeta" value="${esc(rd.meta)}"></div></div>
         <button class="btn btn-sm btn-binco mt-2" data-act="saveRetoDia">Guardar reto de hoy</button>
       </div>
+${cGanadoresAdm()}
       <div class="cardx mt-3"><div class="card-title-x"><span>Retos configurados</span><button class="btn btn-sm btn-binco" data-act="newReto">+ Nuevo reto</button></div>
         ${list.map((r) => {
           const st = G.retoStatus(r, S.today);
@@ -1175,6 +1216,7 @@
       <div class="col-6 col-md-3"><label class="form-label small">Tipo de crédito</label><select class="form-select" name="tipo">${['Todos'].concat(D.TIPOS).map((t) => `<option ${r.tipo === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
       <div class="col-12 col-md-6"><label class="form-label small">Premio</label><select class="form-select" name="premioId"><option value="">Sin premio</option>${S.cfg.premios.map((p) => `<option value="${p.id}" ${r.premioId === p.id ? 'selected' : ''}>${esc(p.emoji + ' ' + p.nombre)}</option>`).join('')}</select></div>
       <div class="col-6 col-md-3"><label class="form-label small">Modalidad</label><select class="form-select" name="modo"><option value="individual" ${r.modo === 'individual' ? 'selected' : ''}>Individual</option><option value="grupal" ${r.modo === 'grupal' ? 'selected' : ''}>Grupal</option></select></div>
+      <div class="col-12 col-md-6"><label class="form-label small">Serie de niveles (opcional)</label><input class="form-control" name="serie" value="${esc(r.serie || '')}" placeholder="Ej. Sprint al 14"><div class="tiny text-muted">Retos con la misma serie son niveles: cada asesor gana solo el más alto que logre.</div></div>
       <div class="col-6 col-md-3"><label class="form-label small">Estado</label><select class="form-select" name="estado">${['activo', 'pausado', 'borrador'].map((s) => `<option ${r.estado === s ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
       <div class="col-12"><label class="form-label small">Participantes</label>
         <div class="form-check"><input class="form-check-input" type="checkbox" name="todos" id="pTodos" ${r.participantes === 'todos' ? 'checked' : ''}><label class="form-check-label small" for="pTodos">Todo el equipo</label></div>
@@ -1187,6 +1229,7 @@
         const f = $('#retoForm'); if (!f.reportValidity()) return;
         const fd = new FormData(f);
         const nr = { id: r.id, nombre: fd.get('nombre').trim(), descripcion: fd.get('descripcion').trim(), inicio: fd.get('inicio'), fin: fd.get('fin'), indicador: fd.get('indicador'), meta: Number(fd.get('meta')), tipo: fd.get('tipo'), premioId: fd.get('premioId'), modo: fd.get('modo'), estado: fd.get('estado'), participantes: fd.get('todos') ? 'todos' : fd.getAll('p') };
+        nr.serie = String(fd.get('serie') || '').trim(); if (!nr.serie) delete nr.serie;
         if (nr.fin < nr.inicio) return toast('La fecha de término debe ser posterior al inicio.');
         if (Array.isArray(nr.participantes) && !nr.participantes.length) return toast('Elige al menos un participante.');
         const i = S.cfg.retos.findIndex((x) => x.id === r.id);

@@ -71,7 +71,8 @@
     pct_contactacion: { label: '% Contactación', unidad: '%', fmt: 'pct', get: (m) => m.contactacion.pct || 0 },
     expedientes: { label: 'Expedientes integrados', unidad: 'expedientes', fmt: 'int', get: (m) => m.eventos.expedientes },
     mesa: { label: 'Expedientes enviados a Mesa', unidad: 'envíos a Mesa', fmt: 'int', get: (m) => m.eventos.mesa },
-    autorizados: { label: 'Autorizados', unidad: 'autorizados', fmt: 'int', get: (m) => m.eventos.autorizados },
+    // Por Fecha de Autorización del CRM; si después se cancela o rechaza, se descuenta.
+    autorizados: { label: 'Créditos autorizados (por fecha de autorización)', unidad: 'autorizados', fmt: 'int', get: (m) => (m.eventos.autorizadosVig != null ? m.eventos.autorizadosVig : m.eventos.autorizados) },
     // En los retos cuentan TODOS los créditos autorizados/dispersados del periodo (también los que cubren el saldo del cierre anterior)
     creditos: { label: 'Créditos colocados (autorizados y dispersados)', unidad: 'créditos', fmt: 'int', get: (m) => (m.creditosBrutos != null ? m.creditosBrutos : m.creditos) },
     monto: { label: 'Monto colocado (autorizado y dispersado)', unidad: 'MXN', fmt: 'money', get: (m) => (m.montoBruto != null ? m.montoBruto : m.monto) },
@@ -139,6 +140,28 @@
       .map((r) => evalReto(ds, cfg, r, asesorId, today))
       .filter(Boolean)
       .sort((a, b) => ({ en_curso: 0, proximo: 1, concluido: 2 }[a.status] - { en_curso: 0, proximo: 1, concluido: 2 }[b.status]) || (b.progreso - a.progreso));
+  }
+
+  /** Ganadores: por reto y asesor. Los retos con la misma «serie» son niveles de un mismo reto:
+   *  cada asesor gana solo el nivel más alto que alcanzó (los premios no se acumulan). */
+  function ganadores(ds, cfg, today) {
+    const out = [];
+    const retos = (cfg.retos || []).filter((r) => r.estado === 'activo');
+    retos.forEach((r) => {
+      const ind = INDICADORES[r.indicador]; if (!ind) return;
+      const grupal = r.modo === 'grupal' || ind.grupal;
+      const ids = participantIds(r, cfg);
+      (grupal ? [ids[0]] : ids).forEach((id) => { if (!id) return; const e = evalReto(ds, cfg, r, id, today); if (e) out.push({ reto: r, asesorId: grupal ? null : id, grupal, e }); });
+    });
+    // niveles: por serie y asesor, solo el de meta más alta cumplido «gana»
+    const best = new Map();
+    out.forEach((x) => { if (!x.reto.serie || !x.e.cumplido || x.grupal) return; const k = x.reto.serie + '|' + x.asesorId; const b = best.get(k); if (!b || Number(x.reto.meta) > Number(b.reto.meta)) best.set(k, x); });
+    out.forEach((x) => {
+      x.gana = x.e.cumplido && (!x.reto.serie || x.grupal || best.get(x.reto.serie + '|' + x.asesorId) === x);
+      x.superado = x.e.cumplido && !x.gana;
+      x.definitivo = x.e.status === 'concluido';
+    });
+    return out;
   }
 
   /** Reto del día. */
@@ -296,7 +319,7 @@
   }
 
   root.BincoGame = {
-    defaultConfig, INDICADORES, fmtInd, isParticipant, participantIds, retoStatus, evalReto, retosAsesor, evalRetoDia,
+    defaultConfig, INDICADORES, fmtInd, isParticipant, participantIds, retoStatus, evalReto, retosAsesor, evalRetoDia, ganadores,
     points, weeklyGoalHits, streak, achievements, teamRows, ranking, weeklyRecognition, showRecognition,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
