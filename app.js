@@ -661,8 +661,9 @@
       const d0 = f.dia && f.dia.d === hoy && !f.dia.nuevo ? f.dia : null, nuevoHoy = !!(f.dia && f.dia.d === hoy && f.dia.nuevo);
       const res = U.norm(f.resLlam || '');
       let llam = 0;
-      if (d0) { const di = (f.intLlam || 0) - (d0.i || 0); llam = di > 0 ? di : (f.resLlam && f.resLlam !== d0.r ? 1 : 0); }
-      else if (f.fUlt === hoy && f.resLlam) llam = nuevoHoy && f.intLlam ? f.intLlam : 1;
+      if (d0 && d0.i != null) { const di = (f.intLlam || 0) - (d0.i || 0); llam = di > 0 ? di : (f.resLlam && f.resLlam !== d0.r ? 1 : 0); }
+      // Sin foto previa de llamadas (lead nuevo, o la carga anterior no traía esas columnas): solo cuenta si su última gestión es de hoy
+      else if (f.fUlt === hoy && f.resLlam) llam = nuevoHoy && f.intLlam ? Math.min(f.intLlam, 3) : 1;
       const av = d0 && idx[f.etapa] != null && idx[d0.e] != null && idx[f.etapa] > idx[d0.e];
       const cambio = d0 && (f.etapa !== d0.e || (f.gestiones || 0) > (d0.g || 0));
       const hecho = f.fUlt === hoy || llam > 0 || av || !!cambio;

@@ -358,7 +358,8 @@
       fColocReporte: U.parseDate(g('fechaColocacion')), // fecha de colocación del Funnel (se captura al autorizar)
       proximaAccion: String(g('proximaAccion') || '').trim().slice(0, 140),
       resLlam: String(g('resultadoLlamada') == null ? '' : g('resultadoLlamada')).trim().slice(0, 80),
-      intLlam: g('intentosLlamada') == null || String(g('intentosLlamada')).trim() === '' ? null : (Number(g('intentosLlamada')) || 0),
+      // null = el reporte no trae la columna; 0 = la trae vacía (sin intentos). Así el trabajo del día distingue «no sé» de «cero».
+      intLlam: mapping.intentosLlamada == null ? null : (g('intentosLlamada') == null || String(g('intentosLlamada')).trim() === '' ? 0 : (Number(g('intentosLlamada')) || 0)),
       coment: String(g('comentario') == null ? '' : g('comentario')).trim().slice(0, 160),
     };
     if (!rec.fAsig) rec.fAsig = rec.fUlt || rec.fContacto;
