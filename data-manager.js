@@ -651,8 +651,16 @@
         funnelEff.forEach((f) => { const k = U.nameKey(f.nombreNorm) + '|' + f.asesorId; if (!porNombre.has(k)) porNombre.set(k, []); porNombre.get(k).push(f); });
         hist.items.forEach((it, i) => {
           const aId = reAlias(it.asesorId);
-          const cands = (porNombre.get(it.nameKey + '|' + aId) || []).filter((f) => !usadosHist.has(f.key))
+          let cands = (porNombre.get(it.nameKey + '|' + aId) || []).filter((f) => !usadosHist.has(f.key))
             .sort((a, b) => (b.etapa === 'colocado') - (a.etapa === 'colocado'));
+          // Respaldo: el nombre del Tablero puede venir escrito distinto al del Funnel (una letra, un nombre de más).
+          // Mismo asesor + mismo monto + ya colocado/autorizado + al menos 2 palabras del nombre en común → es el mismo crédito.
+          if (!cands.length) {
+            const tk = new Set(String(it.nameKey || '').split(' ').filter((w) => w.length > 2));
+            cands = funnelEff.filter((f) => f.asesorId === aId && !usadosHist.has(f.key) && COMO_COLOCADO.includes(f.etapa) && Number(f.monto) === Number(it.monto)
+              && U.nameKey(f.nombreNorm).split(' ').filter((w) => tk.has(w)).length >= 2);
+            if (cands.length > 1) cands = cands.filter((f) => (f.fColocReporte || f.fColoc || f.fUlt || '').slice(0, 7) === it.mes).concat(cands).slice(0, 1);
+          }
           const f = cands[0] || null;
           const mEnd = U.monthEnd(it.mes + '-01');
           const enMes = (d) => d && d.slice(0, 7) === it.mes;
