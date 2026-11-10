@@ -814,15 +814,37 @@
   function pndVieja(P) { return P && P.datosAl && P.datosAl < S.today; }
 
   async function handlePendientes(file) {
+    let P;
+    try { P = JSON.parse(await file.text()); } catch (e) { return toast('No se pudo leer el archivo: ' + e.message); }
+    if (P && P.formato === 'binco-paquete-reto') return handlePaquete(P, file.name);
+    return aplicarPendientes(P, file.name);
+  }
+  /* Paquete del Cockpit: CRM (archivo original, tal cual) + pendientes del día, en un solo archivo.
+   * El CRM se procesa con el mismo asistente y las mismas reglas que si se subiera el Excel. */
+  async function handlePaquete(K, nombre) {
+    if (!K.pendientes && !K.crm) return toast('El paquete está vacío.');
+    if (K.pendientes) { const ok = await aplicarPendientes(K.pendientes, nombre, true); if (!ok) return; }
+    if (!K.crm || !K.crm.b64) { toast('Pendientes cargados. El paquete no traía el reporte del CRM.'); return; }
+    let file;
+    try { const bin = atob(K.crm.b64), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); file = new File([u8], K.crm.archivo || 'crm.xlsx'); }
+    catch (e) { return toast('No se pudo leer el CRM del paquete: ' + e.message); }
+    await handleFile(file, 'funnel');
+    const P = S.pending; if (!P) return;
+    const errs = D.validateMapping('funnel', P.mapping), an = errs.length ? null : D.analyze('funnel', P.table.rows, P.mapping, pendingCfg());
+    if (an && !Object.keys(an.etapasNoReconocidas).length) {
+      await doImport();
+      toast(`Reto actualizado desde el Cockpit: CRM ${K.crm.archivo || ''}${K.pendientes ? ' + ' + U.int(K.pendientes.items.length) + ' pendientes' : ''}. Revisa y publica.`);
+    } else toast('Pendientes cargados. Revisa las columnas del CRM y toca «Guardar mapeo e importar».');
+  }
+  async function aplicarPendientes(P, archivo, silencioso) {
     try {
-      const P = JSON.parse(await file.text());
-      if (!P || P.formato !== 'binco-pendientes' || !Array.isArray(P.items)) return toast('Este archivo no es de pendientes. Descárgalo en el Cockpit → Hoy → «Exportar pendientes para el Reto».');
+      if (!P || P.formato !== 'binco-pendientes' || !Array.isArray(P.items)) return void toast('Este archivo no es de pendientes. Descárgalo en el Cockpit con el botón «Actualizar Reto».');
       const items = P.items.filter((it) => it && PND_CAT_IDX[it.cat] != null).map((it) => ({
         cat: it.cat, ord: +it.ord || 0, ase: String(it.ase || 'Sin asesor'), folio: String(it.folio || ''), nombre: String(it.nombre || ''),
         tels: (Array.isArray(it.tels) ? it.tels : []).map(String).slice(0, 4), etapa: String(it.etapa || ''), monto: +it.monto || null, llantas: !!it.llantas,
         coment: String(it.coment || '').slice(0, 140), dias: it.dias == null ? null : +it.dias, camp: String(it.camp || ''), intentos: it.intentos == null ? null : +it.intentos,
         motivo: String(it.motivo || ''), accion: String(it.accion || '') }));
-      const nueva = { datosAl: String(P.datosAl || ''), generado: String(P.generado || ''), archivo: file.name, items };
+      const nueva = { datosAl: String(P.datosAl || ''), generado: String(P.generado || ''), archivo, items };
       const baseDe = (L) => ({ datosAl: L.datosAl, generado: L.generado, items: L.items });
       const prev = S.raw.pendientes, B0 = S.raw.pendBase;
       // Una lista MÁS VIEJA del mismo día (p. ej. la de la mañana subida otra vez) solo sirve como punto de partida:
@@ -830,7 +852,7 @@
       if (prev && prev.datosAl === nueva.datosAl && nueva.generado && prev.generado && nueva.generado < prev.generado) {
         if (!B0 || B0.datosAl !== nueva.datosAl || nueva.generado < B0.generado) { S.raw.pendBase = baseDe(nueva); await S.store.set('pendBase', S.raw.pendBase); S.cfg.cambiosSinPublicar = true; D.ConfigStore.save(S.cfg); toast(`Lista de las ${pndHora(nueva.generado)} guardada como inicio del día. Ya puedes ver el avance en Equipo.`); }
         else toast(`Esa lista (${pndHora(nueva.generado)}) es posterior a la de inicio del día (${pndHora(B0.generado)}) y anterior a la vigente: no se usó.`);
-        render(); return;
+        render(); return true;
       }
       S.raw.pendientes = nueva;
       const B = S.raw.pendBase; let esBase = false;
@@ -842,15 +864,15 @@
       await S.store.set('pendientes', S.raw.pendientes);
       S.cfg.cambiosSinPublicar = true; D.ConfigStore.save(S.cfg);
       const sinAsesor = [...new Set(items.map((it) => it.ase).filter((a) => !S.cfg.asesores[pndAsesorId(a)]))];
-      toast(`Pendientes cargados: ${U.int(items.length)} del ${U.fmtDate(S.raw.pendientes.datosAl)}` + (esBase ? ' (lista de inicio del día).' : ' · avance actualizado contra la lista de la mañana.') + (sinAsesor.length ? ` Sin asesor registrado: ${sinAsesor.join(', ')}.` : ' Publica para que el equipo los vea.'));
-      render();
-    } catch (e) { console.error(e); toast('No se pudo leer el archivo de pendientes: ' + e.message); }
+      if (!silencioso || sinAsesor.length) toast(`Pendientes cargados: ${U.int(items.length)} del ${U.fmtDate(S.raw.pendientes.datosAl)}` + (esBase ? ' (lista de inicio del día).' : ' · avance actualizado contra la lista de la mañana.') + (sinAsesor.length ? ` Sin asesor registrado: ${sinAsesor.join(', ')}.` : ' Publica para que el equipo los vea.'));
+      render(); return true;
+    } catch (e) { console.error(e); toast('No se pudo leer el archivo de pendientes: ' + e.message); return false; }
   }
   function cPndCarga() {
     const P = S.raw.pendientes; const R = pndResumen();
     const filas = R ? Object.entries(R.por).sort((a, b) => b[1].total - a[1].total).map(([id, c]) => `<tr><td>${esc(S.cfg.asesores[id] ? name(id) : id + ' (no registrado)')}</td><td class="num fw-bold text-center">${c.total}</td><td class="num text-center">${c.responder}</td><td class="num text-center">${c.llamar}</td><td class="num text-center">${c.cerrar}</td><td class="num text-center">${c.seguimiento}</td></tr>`).join('') : '';
-    return `<label class="drop d-block mt-3" data-drop="pendientes"><input type="file" accept=".json" hidden data-file="pendientes"><div class="e">📋</div><div class="t">Pendientes del día (Cockpit Comercial)</div>
-      <div class="small text-muted">Arrastra aquí <b>pendientes_reto_AAAA-MM-DD.json</b> · se genera en el Cockpit → Hoy → «Exportar pendientes para el Reto»</div></label>
+    return `<label class="drop d-block mt-3" data-drop="pendientes"><input type="file" accept=".json" hidden data-file="pendientes"><div class="e">📋</div><div class="t">Paquete del Cockpit (CRM + pendientes del día)</div>
+      <div class="small text-muted">Arrastra aquí <b>reto_AAAA-MM-DD.json</b> · se genera en el Cockpit con el botón «Actualizar Reto». Carga el CRM y los pendientes de una vez.</div></label>
       ${P ? `<div class="cardx mt-2"><div class="card-title-x"><span>Pendientes cargados · datos al ${esc(U.fmtDate(P.datosAl))}</span><span>${U.int(P.items.length)}</span></div>
         ${pndVieja(P) ? '<div class="small warn-text mb-2">⚠️ Esta lista no es de hoy: exporta una nueva desde el Cockpit antes de publicar.</div>' : ''}
         <div class="small text-muted mb-2">Lista del día cargada. Para ver el avance en la tarde <b>solo sube el reporte del CRM</b> (Funnel) arriba y publica: el Reto revisa qué leads de esta lista ya tienen gestión de hoy. Míralo en <b>Equipo → Trabajo del día</b>.</div>
