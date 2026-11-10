@@ -43,7 +43,7 @@
     const src = new D.FileSource(S.store);
     const all = await src.loadAll();
     Object.assign(S.raw, all, { meta: (await S.store.get('meta')) || {} });
-    try { S.raw.pendientes = (await S.store.get('pendientes')) || null; S.raw.pendBase = (await S.store.get('pendBase')) || null; } catch (e) { S.raw.pendientes = null; }
+    try { S.raw.pendientes = (await S.store.get('pendientes')) || null; S.raw.pendBase = (await S.store.get('pendBase')) || null; S.raw.pendCierre = (await S.store.get('pendCierre')) || null; } catch (e) { S.raw.pendientes = null; }
     try { const rb = await S.store.get('respaldoCarga'); if (rb) S.respaldo = { fecha: rb.fecha, archivo: rb.archivo }; } catch (e) {}
     rebuild();
     bindGlobal();
@@ -618,7 +618,8 @@
   function pndDe(id) {
     if (S.publication) return S.pnd && S.pnd.asesorId === id ? S.pnd : null;
     const P = S.raw.pendientes; if (!P) return null;
-    return { asesorId: id, datosAl: P.datosAl, generado: P.generado, items: P.items.filter((it) => pndAsesorId(it.ase) === id), avance: pndAvance(id) };
+    const ay = P.datosAl === S.today ? pndAyerSet() : new Set();
+    return { asesorId: id, datosAl: P.datosAl, generado: P.generado, items: P.items.filter((it) => pndAsesorId(it.ase) === id).map((it) => ay.has(ayerKey(id, it)) ? { ...it, ayer: true } : it), avance: pndAvance(id) };
   }
   function pndResumen() {
     if (S.publication) return S.pndResumen || null;
@@ -687,22 +688,120 @@
       folio: x.f.leadId || '', nombre: x.f.nombre || '', etapaAntes: x.d0 ? x.d0.e : null, etapa: x.f.etapa, llam: x.llam, cont: x.cont, av: x.av,
       res: x.f.resLlam || '', coment: x.f.coment || '', cat: it ? it.cat : null }; })
       .sort((a, b) => (b.av - a.av) || (b.llam - a.llam) || String(a.nombre).localeCompare(String(b.nombre)));
-    return { fecha: hoy, gest: hechos.length, llam: hechos.reduce((t, x) => t + x.llam, 0), cont: hechos.filter((x) => x.cont).length, av: hechos.filter((x) => x.av).length,
+    const listaItems = lista.map((it) => ({ ...it, hecho: attKeys.has(pndKey(it)) }));
+    return { fecha: hoy, listaItems, gest: hechos.length, llam: hechos.reduce((t, x) => t + x.llam, 0), cont: hechos.filter((x) => x.cont).length, av: hechos.filter((x) => x.av).length,
       fuera: hechos.filter((x) => !enLista.has(x.f.key)).length, lista: { tot: lista.length, att: attKeys.size, porCat }, attKeys, items,
       conLlamadas: rows.some((f) => f.intLlam != null || f.resLlam) };
   }
   const STG_LBL = (k) => (D.STAGE_LABEL && D.STAGE_LABEL[k]) || k || '—';
+  /* ---------- LISTA COMPLETA Y PENDIENTES AL CIERRE (vista supervisor) ----------
+   * La lista de la mañana de cada asesor, con su estado en el Funnel (gestionado / pendiente).
+   * Al final de cada día se guarda lo que quedó pendiente; al día siguiente esos clientes llevan la marca «viene de ayer». */
+  const PND_ORD = ['responder', 'cerrar', 'seguimiento', 'llamar'];
+  const PND_TIT = { responder: '💬 Contestaron y esperan', cerrar: '🏁 Por cerrar', seguimiento: '🔁 Interesados sin seguimiento', llamar: '📞 Llamar hoy' };
+  const ayerKey = (id, it) => id + '|' + pndKey(it);
+  /** Cierre del día anterior: { fecha, items:[{id, ...item}] } con lo que quedó pendiente. */
+  function pndAyer() {
+    const C = S.raw.pendCierre; if (!C) return null;
+    const L = C.hoy && C.hoy.fecha < S.today ? C.hoy : (C.prev && C.prev.fecha < S.today ? C.prev : null);
+    return L && L.items && L.items.length ? L : null;
+  }
+  function pndAyerSet() { const A = pndAyer(); return new Set(A ? A.items.map((x) => ayerKey(x.id, x)) : []); }
+  /** Guarda lo que va quedando pendiente hoy (solo supervisor, con lista de hoy). Lo último guardado del día es el cierre. */
+  function pndGuardarCierre(pend) {
+    if (S.publication || !S.store) return;
+    const hoy = S.today, C = S.raw.pendCierre || {};
+    const items = pend.map((x) => ({ id: x.id, cat: x.cat, folio: x.folio, nombre: x.nombre, motivo: x.motivo, monto: x.monto || null, etapa: x.etapa || '' }));
+    const nuevo = C.hoy && C.hoy.fecha < hoy ? { prev: C.hoy, hoy: { fecha: hoy, items } } : { prev: C.prev || null, hoy: { fecha: hoy, items } };
+    if (JSON.stringify(nuevo) === JSON.stringify(C)) return;
+    S.raw.pendCierre = nuevo; S.store.set('pendCierre', nuevo).catch((e) => console.error(e));
+  }
+  /** Pendientes de todo el equipo con su estado. */
+  function pndEquipo() {
+    const ay = pndAyerSet(), out = [];
+    activeIds().filter((id) => id !== 'SIN ASESOR').forEach((id) => { const T = trabajoDia(id); if (!T) return;
+      T.listaItems.forEach((it) => out.push({ ...it, id, ayer: ay.has(ayerKey(id, it)) })); });
+    return out;
+  }
+  const pndOrdCat = (a, b) => (PND_ORD.indexOf(a.cat) - PND_ORD.indexOf(b.cat)) || ((a.ord || 0) - (b.ord || 0));
+  function pndTexto(titulo, L, conAsesor) {
+    let t = titulo + '\n';
+    PND_ORD.forEach((c) => { const X = L.filter((x) => x.cat === c); if (!X.length) return;
+      t += '\n' + PND_TIT[c] + ' (' + X.length + ')\n' + X.map((x) => '• ' + (conAsesor ? name(x.id) + ' · ' : '') + (x.nombre || '(sin nombre)') + (x.folio ? ' (' + x.folio + ')' : '') + ' — ' + (x.motivo || '') + (x.monto ? ' · ' + U.money(x.monto) : '') + (x.ayer ? ' · viene de ayer' : '')).join('\n') + '\n'; });
+    return t.trim();
+  }
+  async function copiarTexto(t) {
+    try { await navigator.clipboard.writeText(t); toast('Lista copiada. Pégala en WhatsApp.'); }
+    catch (e) { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); toast('Lista copiada.'); } catch (er) { toast('No se pudo copiar.'); } ta.remove(); }
+  }
+  const tagAyer = '<span class="badge rounded-pill bg-danger-subtle text-danger-emphasis ms-1">viene de ayer</span>';
+  const estPill = (h) => h ? '<span class="badge rounded-pill bg-success-subtle text-success-emphasis">✓ Gestionado</span>' : '<span class="badge rounded-pill bg-warning-subtle text-warning-emphasis">⏳ Pendiente</span>';
+  const kpiBox = (v, l, cls, bar) => `<div class="col"><div class="border rounded-3 p-2 h-100"><div class="fs-5 fw-bold num ${cls || ''}">${v}</div><div class="tiny text-muted">${l}</div>${bar != null ? `<span class="pbar sm mini-bar"><span style="width:${bar}%"></span></span>` : ''}</div></div>`;
+  const segBtns = (attr, cur, opts) => `<div class="btn-group btn-group-sm" role="group">${opts.map(([k, l]) => `<button type="button" class="btn ${k === cur ? 'btn-binco' : 'btn-outline-secondary'}" data-${attr}="${esc(k)}">${l}</button>`).join('')}</div>`;
+  const filtroInicial = () => new Date().getHours() >= 17 ? 'pend' : 'todos';
+  S.trd = { id: null, f: 'todos' };
+  function trdLista() {
+    const { id, f } = S.trd; const T = trabajoDia(id); if (!T) return '';
+    const ay = pndAyerSet(); const L = T.listaItems.map((it) => ({ ...it, id, ayer: ay.has(ayerKey(id, it)) })).sort(pndOrdCat);
+    const V = L.filter((x) => f === 'todos' || (f === 'pend' ? !x.hecho : x.hecho));
+    if (!L.length) return '<div class="text-muted small py-3 text-center">No hay lista de pendientes de hoy para este asesor. Súbela en Cargar datos.</div>';
+    const filas = PND_ORD.map((c) => { const X = V.filter((x) => x.cat === c); if (!X.length) return ''; const all = L.filter((x) => x.cat === c);
+      return `<tr class="table-light"><td colspan="6" class="fw-bold" style="color:var(--binco-violet,#3b2a8f)">${PND_TIT[c]} · ${all.filter((x) => x.hecho).length} de ${all.length} atendidos</td></tr>` +
+        X.map((x) => `<tr><td class="fw-bold">${esc(x.nombre || '(sin nombre)')}${x.ayer ? tagAyer : ''}</td><td class="text-muted">${esc(x.folio)}</td><td style="white-space:normal">${esc(x.motivo)}</td><td class="text-muted">${pndDias(x.dias) || '—'}</td><td class="num">${x.monto ? U.money(x.monto) : '—'}</td><td>${estPill(x.hecho)}</td></tr>`).join(''); }).join('');
+    return filas ? `<div class="table-responsive"><table class="table table-sm small align-middle mb-0"><thead><tr><th>Cliente</th><th>Folio</th><th>Motivo en la lista</th><th>Esperando</th><th>Monto</th><th>Estado en Funnel</th></tr></thead><tbody>${filas}</tbody></table></div>`
+      : `<div class="text-muted small py-3 text-center">${f === 'pend' ? '✓ Sin pendientes: toda su lista tiene gestión de hoy en el Funnel.' : 'Aún no hay gestiones de su lista hoy en el Funnel.'}</div>`;
+  }
   function trabajoDetalle(id) {
     const T = trabajoDia(id); if (!T) return;
+    S.trd = { id, f: filtroInicial() };
     const CAT = { responder: '💬', llamar: '📞', cerrar: '🏁', seguimiento: '🔁' };
-    const body = `<div class="small text-muted mb-2">Lo que registró en el Funnel el ${esc(U.fmtDate(T.fecha))}: ${T.gest} leads gestionados · ${T.llam} llamadas · ${T.cont} contacto${T.cont === 1 ? '' : 's'} · ${T.av} ${T.av === 1 ? 'avanzó' : 'avanzaron'} de etapa · ${T.fuera} fuera de su lista.</div>
-      ${T.items.length ? `<div class="table-responsive"><table class="table table-sm small align-middle mb-0"><thead><tr><th>Cliente</th><th>Folio</th><th class="text-center">Lista</th><th>Etapa</th><th class="text-center">Llamadas</th><th>Resultado de llamada</th><th>Último comentario</th></tr></thead><tbody>
+    const ay = pndAyerSet(), L = T.listaItems, pend = L.filter((x) => !x.hecho);
+    const montoPend = pend.filter((x) => x.cat === 'cerrar').reduce((t, x) => t + (x.monto || 0), 0);
+    const nAyer = L.filter((x) => ay.has(ayerKey(id, x))).length, pct = L.length ? Math.round((L.length - pend.length) / L.length * 100) : 0;
+    const gest = T.items.length ? `<details class="mt-3"><summary class="small fw-bold">Todo lo que gestionó hoy en el Funnel (${T.items.length}${T.fuera ? `, ${T.fuera} fuera de su lista` : ''})</summary><div class="table-responsive mt-2"><table class="table table-sm small align-middle mb-0"><thead><tr><th>Cliente</th><th>Folio</th><th class="text-center">Lista</th><th>Etapa</th><th class="text-center">Llamadas</th><th>Resultado de llamada</th><th>Último comentario</th></tr></thead><tbody>
       ${T.items.map((x) => `<tr><td class="fw-bold">${esc(x.nombre)}</td><td>${esc(x.folio)}</td><td class="text-center">${x.cat ? CAT[x.cat] || '•' : '<span class="text-muted">fuera</span>'}</td>
-        <td>${x.av ? `${esc(STG_LBL(x.etapaAntes))} → <b class="ok-text">${esc(STG_LBL(x.etapa))}</b>` : esc(STG_LBL(x.etapa))}</td><td class="text-center">${x.llam || ''}</td><td>${esc(x.res)}${x.cont ? ' <span class="ok-text">✓</span>' : ''}</td><td class="text-muted" style="max-width:260px;white-space:normal">${esc(x.coment)}</td></tr>`).join('')}</tbody></table></div>`
-      : '<div class="text-muted small py-3 text-center">Sin gestiones registradas hoy en el Funnel.</div>'}
-      <div class="tiny text-muted mt-2">Fuente: reporte del CRM. Cuenta como gestionado si su «Fecha última gestión» es hoy o si hoy cambió su etapa, resultado o intentos de llamada.</div>`;
-    openModal(name(id) + ' · trabajo del día', body, '<button class="btn btn-light" data-bs-dismiss="modal">Cerrar</button>');
+        <td>${x.av ? `${esc(STG_LBL(x.etapaAntes))} → <b class="ok-text">${esc(STG_LBL(x.etapa))}</b>` : esc(STG_LBL(x.etapa))}</td><td class="text-center">${x.llam || ''}</td><td>${esc(x.res)}${x.cont ? ' <span class="ok-text">✓</span>' : ''}</td><td class="text-muted" style="max-width:260px;white-space:normal">${esc(x.coment)}</td></tr>`).join('')}</tbody></table></div></details>` : '';
+    const body = `<div class="small text-muted mb-2">Lo que registró en el Funnel el ${esc(U.fmtDate(T.fecha))}: ${T.gest} leads gestionados · ${T.llam} llamadas · ${T.cont} contacto${T.cont === 1 ? '' : 's'} · ${T.av} ${T.av === 1 ? 'avanzó' : 'avanzaron'} de etapa · ${T.fuera} fuera de su lista.</div>
+      ${L.length ? `<div class="row row-cols-2 row-cols-md-4 g-2 mb-3">${kpiBox(`${L.length - pend.length} de ${L.length}`, 'de su lista atendidos', '', pct)}${kpiBox(pend.length, 'pendientes', pend.length ? 'warn-text' : 'ok-text')}${kpiBox(montoPend ? U.money(montoPend) : '$0', 'por cerrar sin gestión', montoPend ? 'text-danger' : '')}${kpiBox(nAyer, 'vienen de ayer', nAyer ? 'text-danger' : '')}</div>
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2"><b class="small">Su lista de hoy</b>${segBtns('trf', S.trd.f, [['todos', `Todos (${L.length})`], ['pend', `Solo pendientes (${pend.length})`], ['hechos', `Gestionados (${L.length - pend.length})`]])}</div>` : ''}
+      <div id="trd-list">${trdLista()}</div>${gest}
+      <div class="tiny text-muted mt-2">Fuente: reporte del CRM. «Gestionado» = su «Fecha última gestión» es hoy o hoy cambió su etapa, resultado o intentos de llamada. Después de las 5 pm se abre en «Solo pendientes». La marca «ya lo gestioné» del asesor vive en su teléfono y no cuenta aquí.</div>`;
+    openModal(name(id) + ' · trabajo del día', body, `${pend.length ? `<button class="btn btn-light me-auto" data-trd-copy="1">📋 Copiar pendientes para WhatsApp</button>` : ''}<button class="btn btn-light" data-bs-dismiss="modal">Cerrar</button>`);
+    $('#modal .modal-dialog').classList.add('modal-xl');
   }
+  S.peq = { a: '' };
+  function peqLista() {
+    const P = pndEquipo().filter((x) => !x.hecho && (!S.peq.a || x.id === S.peq.a)).sort((a, b) => pndOrdCat(a, b) || (b.ayer - a.ayer));
+    const A = pndAyer(), hoyK = new Set(pndEquipo().map((x) => ayerKey(x.id, x)));
+    const fuera = A ? A.items.filter((x) => !hoyK.has(ayerKey(x.id, x)) && (!S.peq.a || x.id === S.peq.a)) : [];
+    const filas = PND_ORD.map((c) => { const X = P.filter((x) => x.cat === c); if (!X.length) return '';
+      return `<tr class="table-light"><td colspan="5" class="fw-bold" style="color:var(--binco-violet,#3b2a8f)">${PND_TIT[c]} · ${X.length} pendiente${X.length === 1 ? '' : 's'}</td></tr>` +
+        X.map((x) => `<tr><td>${esc(name(x.id))}</td><td class="fw-bold">${esc(x.nombre || '(sin nombre)')}${x.ayer ? tagAyer : ''}</td><td class="text-muted">${esc(x.folio)}</td><td style="white-space:normal">${esc(x.motivo)}</td><td class="num">${x.monto ? U.money(x.monto) : '—'}</td></tr>`).join(''); }).join('');
+    return (filas ? `<div class="table-responsive"><table class="table table-sm small align-middle mb-0"><thead><tr><th>Asesor</th><th>Cliente</th><th>Folio</th><th>Motivo</th><th>Monto</th></tr></thead><tbody>${filas}</tbody></table></div>` : '<div class="text-muted small py-3 text-center">✓ Sin pendientes: todas las listas tienen gestión de hoy en el Funnel.</div>') +
+      (fuera.length ? `<details class="mt-3"><summary class="small fw-bold">Quedaron pendientes el ${esc(U.fmtDate(A.fecha))} y ya no están en la lista de hoy (${fuera.length})</summary><div class="tiny text-muted my-1">Ya no cumplen la regla para entrar a la lista (por ejemplo, ya se gestionaron o cambiaron de etapa). Revísalos con el asesor.</div><div class="table-responsive"><table class="table table-sm small mb-0"><tbody>${fuera.map((x) => `<tr><td>${esc(name(x.id))}</td><td class="fw-bold">${esc(x.nombre)}</td><td class="text-muted">${esc(x.folio)}</td><td>${PND_TIT[x.cat] ? PND_TIT[x.cat].split(' ')[0] : ''} ${esc(x.motivo)}</td></tr>`).join('')}</tbody></table></div></details>` : '');
+  }
+  function pndEquipoDetalle() {
+    const T = pndEquipo(); if (!T.length) return toast('Aún no hay lista de pendientes de hoy.');
+    S.peq = { a: '' };
+    const pend = T.filter((x) => !x.hecho), ids = [...new Set(T.map((x) => x.id))];
+    const montoPend = pend.filter((x) => x.cat === 'cerrar').reduce((t, x) => t + (x.monto || 0), 0), resp = pend.filter((x) => x.cat === 'responder').length;
+    const porA = ids.map((id) => name(id).split(' ')[0] + ' ' + pend.filter((x) => x.id === id).length).join(' · ');
+    const body = `<div class="row row-cols-2 row-cols-md-4 g-2 mb-3">${kpiBox(`${pend.length} de ${T.length}`, 'pendientes en las listas de hoy', pend.length ? 'warn-text' : 'ok-text', T.length ? Math.round((T.length - pend.length) / T.length * 100) : 0)}${kpiBox(esc(porA), 'pendientes por asesor')}${kpiBox(montoPend ? U.money(montoPend) : '$0', 'por cerrar sin gestión', montoPend ? 'text-danger' : '')}${kpiBox(resp, 'contestaron y nadie respondió', resp ? 'text-danger' : '')}</div>
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2"><div class="small text-muted">Ordenado por prioridad: primero quien ya levantó la mano y el dinero autorizado.</div>${segBtns('peqa', '', [['', 'Todos'], ...ids.map((id) => [id, esc(name(id).split(' ')[0])])])}</div>
+      <div id="peq-list">${peqLista()}</div>
+      <div class="tiny text-muted mt-2">Estado según el último reporte del CRM cargado hoy. Lo que quede pendiente al cierre aparece mañana con la marca «viene de ayer» si vuelve a la lista, también en el celular del asesor al publicar.</div>`;
+    openModal('Pendientes del equipo · ' + U.fmtDate(S.today), body, `${pend.length ? '<button class="btn btn-binco me-auto" data-peq-copy="1">📋 Copiar lista</button>' : ''}<button class="btn btn-light" data-bs-dismiss="modal">Cerrar</button>`);
+    $('#modal .modal-dialog').classList.add('modal-xl');
+  }
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-trf]'); if (t) { S.trd.f = t.dataset.trf; $$('[data-trf]').forEach((b) => { const on = b.dataset.trf === S.trd.f; b.classList.toggle('btn-binco', on); b.classList.toggle('btn-outline-secondary', !on); }); const c = $('#trd-list'); if (c) c.innerHTML = trdLista(); return; }
+    const q = e.target.closest('[data-peqa]'); if (q) { S.peq.a = q.dataset.peqa; $$('[data-peqa]').forEach((b) => { const on = b.dataset.peqa === S.peq.a; b.classList.toggle('btn-binco', on); b.classList.toggle('btn-outline-secondary', !on); }); const c = $('#peq-list'); if (c) c.innerHTML = peqLista(); return; }
+    if (e.target.closest('[data-trd-copy]')) { const T = trabajoDia(S.trd.id); const ay = pndAyerSet(); const P = T.listaItems.filter((x) => !x.hecho).map((x) => ({ ...x, id: S.trd.id, ayer: ay.has(ayerKey(S.trd.id, x)) })).sort(pndOrdCat);
+      copiarTexto(pndTexto('Pendientes de hoy · ' + name(S.trd.id) + ' · ' + U.fmtDate(S.today) + ' (' + P.length + ' de ' + T.listaItems.length + ')', P, false)); return; }
+    if (e.target.closest('[data-peq-copy]')) { const P = pndEquipo().filter((x) => !x.hecho && (!S.peq.a || x.id === S.peq.a)).sort(pndOrdCat);
+      copiarTexto(pndTexto('Pendientes del equipo al cierre · ' + U.fmtDate(S.today) + ' (' + P.length + ')', P, true)); return; }
+    if (e.target.closest('[data-peq]')) pndEquipoDetalle();
+  });
   const pndPct = (a) => a && a.base ? Math.round(a.atendidos / a.base * 100) : 0;
   const pndHora = (iso) => { try { return new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } };
   function pndCuenta(P) { const c = { total: 0, responder: 0, llamar: 0, cerrar: 0, seguimiento: 0 }; (P ? P.items : []).forEach((it) => { c.total++; c[it.cat]++; }); return c; }
@@ -776,7 +875,8 @@
     const pctCell = (t) => { if (!t.lista.tot) return '<td class="text-center text-muted">—</td>'; const p = Math.round(t.lista.att / t.lista.tot * 100), lvl = p >= 80 ? 'meta' : p >= 50 ? 'cerca' : p >= 25 ? 'avance' : 'inicio';
       return `<td class="text-center" style="min-width:130px"><span class="num fw-bold lvl-${lvl}">${t.lista.att} de ${t.lista.tot} · ${p}%</span><span class="pbar sm mini-bar"><span style="width:${p}%"></span></span></td>`; };
     const llCell = (t) => { const c = t.lista.porCat.llamar; return `<td class="text-center"><span class="num fw-bold">${t.llam}</span>${c && c.t ? `<span class="text-muted"> / ${c.t}</span>` : ''}${t.cont ? `<div class="tiny ok-text">${t.cont} contacto${t.cont === 1 ? '' : 's'}</div>` : ''}</td>`; };
-    return `<div class="cardx mt-3"><div class="card-title-x"><span>Trabajo del día por asesor · ${esc(U.fmtDate(hoy))}</span><span>Toca una fila para ver el detalle</span></div>
+    if (conLista) { try { pndGuardarCierre(pndEquipo().filter((x) => !x.hecho)); } catch (e) { console.error(e); } }
+    return `<div class="cardx mt-3"><div class="card-title-x"><span>Trabajo del día por asesor · ${esc(U.fmtDate(hoy))}</span><span>${conLista ? '<button class="btn btn-sm btn-binco" data-peq="1">📋 Pendientes del equipo</button> · ' : ''}Toca una fila para ver el detalle</span></div>
       <div class="table-responsive"><table class="table table-sm small align-middle mb-0"><thead><tr><th>Asesor</th><th class="text-center">Su lista de hoy</th><th class="text-center">💬 Respuestas</th><th class="text-center">📞 Llamadas / cuota</th><th class="text-center">🏁 Por cerrar</th><th class="text-center">🔁 Seguimiento</th>
         <th class="text-center">Gestiones hoy</th><th class="text-center">⬆️ Avanzaron</th><th class="text-center">Fuera de lista</th></tr></thead>
       <tbody>${T.map(([id, t]) => `<tr data-trab="${esc(id)}" style="cursor:pointer"><td class="fw-bold">${esc(name(id))}</td>${pctCell(t)}<td class="text-center">${frac(t.lista.porCat.responder)}</td>${llCell(t)}<td class="text-center">${frac(t.lista.porCat.cerrar)}</td><td class="text-center">${frac(t.lista.porCat.seguimiento)}</td>
@@ -795,7 +895,7 @@
       const list = P.items.filter((it) => it.cat === cat).sort((a, b) => (listo(a) - listo(b)) || a.ord - b.ord);
       const card = (it) => { const h = hechos.has(pndKey(it)); const k = pndKey(it); const fx = att.has(k);
         return `<div class="pnd-item${h || fx ? ' done' : ''}">${fx ? '<div class="tiny ok-text mb-1">✅ Gestionado hoy en el Funnel</div>' : ''}
-          <div class="pnd-top"><div class="pnd-name">${esc(it.nombre || '(sin nombre)')}${it.llantas ? ' <span class="pnd-tag">Llantas</span>' : ''}</div>${it.dias != null ? `<span class="pnd-dias${it.dias >= 3 ? ' alto' : ''}">${pndDias(it.dias)}</span>` : ''}</div>
+          <div class="pnd-top"><div class="pnd-name">${esc(it.nombre || '(sin nombre)')}${it.llantas ? ' <span class="pnd-tag">Llantas</span>' : ''}${it.ayer ? ' <span class="pnd-tag" style="background:#fde8e6;color:#b4362a">Viene de ayer</span>' : ''}</div>${it.dias != null ? `<span class="pnd-dias${it.dias >= 3 ? ' alto' : ''}">${pndDias(it.dias)}</span>` : ''}</div>
           <div class="pnd-mot">${esc(it.motivo)}${it.etapa ? ' · ' + esc(it.etapa) : ''}${it.monto ? ' · ' + U.money(it.monto) : ''}</div>
           <div class="pnd-acc">👉 ${esc(it.accion)}</div>
           ${it.coment ? `<div class="tiny text-muted mt-1">Último comentario: ${esc(it.coment)}</div>` : ''}
@@ -1855,6 +1955,7 @@ ${cGanadoresAdm()}
    * ---------------------------------------------------------------- */
   let modalObj = null;
   function openModal(title, body, footer, onShown) {
+    $('#modal .modal-dialog').classList.remove('modal-xl');
     $('#modalTitle').textContent = title; $('#modalBody').innerHTML = body;
     const f = $('#modalFooter'); f.innerHTML = footer || ''; f.classList.toggle('d-none', !footer);
     modalObj = modalObj || new bootstrap.Modal($('#modal'));
