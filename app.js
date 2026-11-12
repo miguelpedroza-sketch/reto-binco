@@ -287,10 +287,11 @@
     const seg = E.map((x) => `<i class="${b.icp >= x[0] / 100 - 1e-9 ? 'on' : ''}${b.nivel[0] === x[0] ? ' cur' : ''}" title="ICP desde ${x[0]}% · ${U.money(x[1])}"></i>`).join('');
     const fila = (t, d, pts, w) => `<div class="bono-row"><div><b>${t}</b><div class="tiny text-muted">${d}</div></div><div class="num fw-bold">${pts.toFixed(1)} pts</div><div class="bono-bar"><i style="width:${Math.min(100, w * 100).toFixed(0)}%"></i></div></div>`;
     const o = b.opc;
+    const kM = (v) => '$' + (v >= 1000 ? (v / 1000).toFixed(v % 1000 ? 1 : 0) + 'K' : v);
     return `<div class="cardx span2 bono-card">${off}<div class="card-title-x"><span>Tu bono estimado · ${esc(mesTxt)}</span><span>💰</span></div>
       <div class="bono-big num">${U.money(b.bono)}</div>
       <div class="small text-muted">Calificación (ICP) <b>${(b.icp * 100).toFixed(1)}%</b>${b.nivel[1] ? ` · escalón «desde ${b.nivel[0]}%»` : ' · aún no llegas al primer escalón (' + (E[0] ? E[0][0] : 50) + '%)'}</div>
-      <div class="bono-lvl">${seg}</div><div class="d-flex justify-content-between tiny text-muted">${E.length ? `<span>${E[0][0]}% · ${U.money(E[0][1])}</span>` : ''}${E.length ? `<span>${E[E.length - 1][0]}% · ${U.money(E[E.length - 1][1])}</span>` : ''}</div>
+      <div class="bono-lvl">${seg}</div><div class="bono-lbl" style="grid-template-columns:repeat(${E.length},minmax(0,1fr))">${E.map((x) => `<span class="${b.nivel[0] === x[0] ? 'cur' : b.sig && b.sig[0] === x[0] ? 'nx' : ''}"><b>${x[0]}%</b>${kM(x[1])}</span>`).join('')}</div>
       ${P.gate > 0 ? `<div class="small mt-2 ${b.candado < 1 ? 'warn-text' : 'ok-text'}">${b.candado < 1 ? `⚠️ Candado de contactación: tu contactación (${U.pct(b.cont, 0)}) está debajo de ${P.gate}%, el bono se multiplica ×${P.gateMult}.` : `✓ Candado de contactación cumplido (${P.gate}% o más)`}</div>` : ''}
       <div class="mt-3"><div class="tiny text-muted text-uppercase fw-bold mb-1">Cómo se calcula</div>
         ${fila('Créditos', `${b.cred} de ${b.metaC} · pesa ${P.pesoCred}%`, b.pts.cred, b.cred / b.metaC)}

@@ -352,3 +352,9 @@ body { min-height: 100vh; }
 .bono-bar i { display: block; height: 100%; border-radius: 3px; background: #1b9a8a; }
 .bono-next { background: #f3f0ff; border-radius: 12px; padding: 12px; font-size: .9rem; }
 .bono-next div { padding: 3px 0; }
+.bono-lbl { display: grid; gap: 3px; text-align: center; font-size: .7rem; line-height: 1.15; color: #8a91a3; }
+.bono-lbl b { display: block; font-weight: 600; }
+.bono-lbl .cur { color: var(--b-azul); font-weight: 700; }
+.bono-lbl .cur b { font-weight: 800; }
+.bono-lbl .nx { color: #6b4fd0; }
+@media (max-width: 420px) { .bono-lbl { font-size: .6rem; } }
