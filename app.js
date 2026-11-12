@@ -217,6 +217,7 @@
    * RENDER PRINCIPAL
    * ---------------------------------------------------------------- */
   function render() {
+    S.vcl = {};
     // La app puede quedar abierta varios días (pestaña o app instalada): la fecha de hoy se actualiza en cada vista.
     if (!/^\d{4}-\d{2}-\d{2}$/.test(qs.get('hoy') || '')) { const t = U.today(); if (t !== S.today) S.today = t; }
     Object.values(S.charts).forEach((c) => c && c.destroy && c.destroy()); S.charts = {};
@@ -237,6 +238,105 @@
    * ---------------------------------------------------------------- */
   const LVL_EMOJI = { inicio: '🌱', avance: '💪', cerca: '🔥', meta: '🏆' };
 
+  /* ---------- BONO ESTIMADO (calculadora de bonos de BINCO) ----------
+   * ICP = peso créditos × min(créditos/meta créditos, tope) + peso monto × min(monto/meta, tope).
+   * Bono = bono del escalón de ICP, con tope.
+   * Datos: colocación del CRM y metas de cada asesor. Por decisión de Miguel (nov-2026) la contactación ya no cuenta
+   * para el bono: su 10% se repartió entre créditos (65%) y monto (35%) y se quitó el candado de contactación.
+   * El cálculo conserva el soporte de contactación/candado con peso 0 por si se reactiva.
+   * Solo se publica dentro del paquete cifrado de cada asesor; nunca en los datos del equipo. */
+  const BONO_DEF = { activo: false, pesoCred: 65, pesoMonto: 35, pesoCont: 0, metaCont: 45, gate: 0, gateMult: 1, cap: 150, tope: 24000,
+    escalera: [[0, 0], [50, 3000], [60, 5500], [70, 8000], [80, 10000], [90, 11500], [100, 12000], [101, 15000], [116, 19000], [131, 22000], [150, 24000]] };
+  const bonoCfg = () => Object.assign({}, BONO_DEF, S.cfg.bono || {});
+  const mesRange = () => ({ from: U.monthStart(S.today), to: U.monthEnd(S.today) });
+  function bonoCalc(m, P) {
+    P = P || bonoCfg();
+    const cred = m.creditos || 0, monto = m.monto || 0, meta = m.meta || 0, metaC = m.metaCreditos || 0, cont = m.contactacion && m.contactacion.pct != null ? m.contactacion.pct : 0;
+    if (!meta || !metaC) return { error: 'Sin meta de ' + (!meta ? 'monto' : 'créditos') + ' capturada para este mes.' };
+    const cap = P.cap / 100, wC = P.pesoCred / 100, wM = P.pesoMonto / 100, wT = P.pesoCont / 100;
+    const sC = Math.min(cred / metaC, cap), sM = Math.min(monto / meta, cap), sT = Math.min((cont / 100) / (P.metaCont / 100), cap);
+    const icp = wC * sC + wM * sM + wT * sT;
+    const esc_ = P.escalera.slice().sort((a, b) => a[0] - b[0]);
+    const nivel = esc_.filter((x) => icp >= x[0] / 100 - 1e-9).pop() || [0, 0];
+    const candado = P.gate > 0 && cont < P.gate ? P.gateMult : 1;
+    const bono = Math.min(nivel[1] * candado, P.tope);
+    const sig = esc_.find((x) => x[0] / 100 > icp + 1e-9) || null;
+    let opc = null;
+    if (sig) { const d = sig[0] / 100 - icp;
+      opc = { faltaIcp: d, bonoSig: Math.min(sig[1] * candado, P.tope), umbral: sig[0],
+        creditos: wC && sC + d / wC <= cap + 1e-9 ? Math.max(1, Math.ceil(d / wC * metaC - 1e-9)) : null,
+        monto: wM && sM + d / wM <= cap + 1e-9 ? Math.ceil(d / wM * meta / 1000 - 1e-9) * 1000 : null,
+        contactacion: wT && sT + d / wT <= cap + 1e-9 && cont + d / wT * P.metaCont <= 100 ? cont + d / wT * P.metaCont : null }; }
+    return { cred, monto, meta, metaC, cont, sC, sM, sT, icp, nivel, candado, bono, sig, opc, pts: { cred: wC * sC * 100, monto: wM * sM * 100, cont: wT * sT * 100 }, P };
+  }
+  /** Bono del asesor para el paquete cifrado (solo si está activo). */
+  function bonoDe(id) {
+    const P = bonoCfg(); if (!P.activo) return null;
+    const b = bonoCalc(compute([id], mesRange(), 'Todos'), P);
+    return Object.assign({ mes: U.monthKey(S.today), corte: (S.raw.meta && S.raw.meta.funnel) || new Date().toISOString() }, b, { P: undefined });
+  }
+  function cBono(id) {
+    const P = bonoCfg();
+    let b, corte, mes;
+    if (S.publication) { b = S.bonoMine; if (!b) return ''; corte = b.corte; mes = b.mes; b = Object.assign({}, b, { P }); }
+    else { if (!P.activo && !isAdmin()) return ''; b = bonoCalc(compute([id], mesRange(), 'Todos'), P); corte = S.raw.meta && S.raw.meta.funnel; mes = U.monthKey(S.today); }
+    const mesTxt = U.monthName(mes + '-01');
+    const off = !S.publication && !P.activo ? '<div class="small warn-text mb-2">Vista previa: el bono está apagado en Ajustes → Bono, los asesores no lo ven.</div>' : '';
+    if (b.error) return `<div class="cardx span2">${off}<div class="card-title-x"><span>Tu bono estimado · ${esc(mesTxt)}</span><span>💰</span></div><div class="small text-muted">${esc(b.error)}</div></div>`;
+    const E = P.escalera.slice().sort((a, c) => a[0] - c[0]).filter((x) => x[1] > 0);
+    const seg = E.map((x) => `<i class="${b.icp >= x[0] / 100 - 1e-9 ? 'on' : ''}${b.nivel[0] === x[0] ? ' cur' : ''}" title="ICP desde ${x[0]}% · ${U.money(x[1])}"></i>`).join('');
+    const fila = (t, d, pts, w) => `<div class="bono-row"><div><b>${t}</b><div class="tiny text-muted">${d}</div></div><div class="num fw-bold">${pts.toFixed(1)} pts</div><div class="bono-bar"><i style="width:${Math.min(100, w * 100).toFixed(0)}%"></i></div></div>`;
+    const o = b.opc;
+    return `<div class="cardx span2 bono-card">${off}<div class="card-title-x"><span>Tu bono estimado · ${esc(mesTxt)}</span><span>💰</span></div>
+      <div class="bono-big num">${U.money(b.bono)}</div>
+      <div class="small text-muted">Calificación (ICP) <b>${(b.icp * 100).toFixed(1)}%</b>${b.nivel[1] ? ` · escalón «desde ${b.nivel[0]}%»` : ' · aún no llegas al primer escalón (' + (E[0] ? E[0][0] : 50) + '%)'}</div>
+      <div class="bono-lvl">${seg}</div><div class="d-flex justify-content-between tiny text-muted">${E.length ? `<span>${E[0][0]}% · ${U.money(E[0][1])}</span>` : ''}${E.length ? `<span>${E[E.length - 1][0]}% · ${U.money(E[E.length - 1][1])}</span>` : ''}</div>
+      ${P.gate > 0 ? `<div class="small mt-2 ${b.candado < 1 ? 'warn-text' : 'ok-text'}">${b.candado < 1 ? `⚠️ Candado de contactación: tu contactación (${U.pct(b.cont, 0)}) está debajo de ${P.gate}%, el bono se multiplica ×${P.gateMult}.` : `✓ Candado de contactación cumplido (${P.gate}% o más)`}</div>` : ''}
+      <div class="mt-3"><div class="tiny text-muted text-uppercase fw-bold mb-1">Cómo se calcula</div>
+        ${fila('Créditos', `${b.cred} de ${b.metaC} · pesa ${P.pesoCred}%`, b.pts.cred, b.cred / b.metaC)}
+        ${fila('Monto', `${U.money(b.monto)} de ${U.money(b.meta)} · pesa ${P.pesoMonto}%`, b.pts.monto, b.monto / b.meta)}
+        ${P.pesoCont > 0 ? fila('Contactación', `${U.pct(b.cont, 0)} de ${P.metaCont}% · pesa ${P.pesoCont}%`, b.pts.cont, b.cont / P.metaCont) : ''}
+        <div class="tiny text-muted">La barra es tu avance contra la meta. Cada parte cuenta hasta ${P.cap}% de su meta.</div></div>
+      ${o && o.creditos == null && o.monto == null && (o.contactacion == null || !(P.pesoCont > 0)) ? `<div class="bono-next mt-3"><b>🏆 Llegaste al máximo alcanzable.</b> El siguiente escalón (${o.umbral}%) pide más ICP del que permiten los topes de ${P.cap}% por componente.</div>`
+        : o ? `<div class="bono-next mt-3"><b>Para subir a ${U.money(o.bonoSig)} te falta ${(o.faltaIcp * 100).toFixed(1)}% de ICP.</b> Con <u>cualquiera</u> de estas:
+        <div>💳 ${o.creditos != null ? `<b>${o.creditos} crédito${o.creditos === 1 ? '' : 's'} más</b>` : '<span class="text-muted">créditos: ya estás en el tope</span>'}</div>
+        <div>💰 ${o.monto != null ? `<b>${U.money(o.monto)} más</b> de monto` : '<span class="text-muted">monto: ya estás en el tope</span>'}</div>
+        ${P.pesoCont > 0 ? `<div>📞 ${o.contactacion != null ? `Contactación a <b>${U.pct(o.contactacion, 0)}</b>` : '<span class="text-muted">contactación: no alcanza por sí sola</span>'}</div>` : ''}</div>`
+        : '<div class="bono-next mt-3"><b>🏆 Estás en el escalón máximo.</b></div>'}
+      <div class="tiny text-muted mt-2">Estimado con el CRM${corte ? ' al ' + esc(U.fmtDateTime(corte)) : ''}. El pago oficial lo confirma nómina. Solo tú ves esta información.</div></div>`;
+  }
+  function cBonoEquipo() {
+    if (S.publication || !isAdmin()) return '';
+    const P = bonoCfg();
+    const ids = activeIds().filter((id) => id !== 'SIN ASESOR');
+    const R = ids.map((id) => [id, bonoCalc(compute([id], mesRange(), 'Todos'), P)]);
+    return `<div class="cardx mt-3"><div class="card-title-x"><span>Bono estimado del mes · solo supervisor</span><span>${P.activo ? '<span class="ok-text">Visible para cada asesor</span>' : '<span class="warn-text">Apagado: los asesores no lo ven</span>'}</span></div>
+      <div class="table-responsive"><table class="table table-sm small align-middle mb-0"><thead><tr><th>Asesor</th><th class="text-center">Créditos</th><th class="text-center">Monto</th>${P.pesoCont > 0 ? '<th class="text-center">Contactación</th>' : ''}<th class="text-center">ICP</th><th class="text-center">Escalón</th>${P.gate > 0 ? '<th class="text-center">Candado</th>' : ''}<th class="text-end">Bono estimado</th></tr></thead><tbody>
+      ${R.map(([id, b]) => b.error ? `<tr><td class="fw-bold">${esc(name(id))}</td><td colspan="${5 + (P.pesoCont > 0) + (P.gate > 0)}" class="text-muted">${esc(b.error)}</td></tr>` : `<tr><td class="fw-bold">${esc(name(id))}</td><td class="text-center">${b.cred} / ${b.metaC}</td><td class="text-center">${U.money(b.monto)} / ${U.money(b.meta)}</td>${P.pesoCont > 0 ? `<td class="text-center">${U.pct(b.cont, 0)}</td>` : ''}<td class="text-center fw-bold">${(b.icp * 100).toFixed(1)}%</td><td class="text-center">${b.nivel[1] ? 'desde ' + b.nivel[0] + '%' : '—'}</td>${P.gate > 0 ? `<td class="text-center">${b.candado < 1 ? '×' + b.candado : '✓'}</td>` : ''}<td class="text-end fw-bold num">${U.money(b.bono)}</td></tr>`).join('')}</tbody></table></div>
+      <div class="tiny text-muted mt-2">Mes en curso, todos los tipos de crédito. Colocación del CRM (autorizados y dispersados) y metas de cada asesor; la contactación no cuenta. Parámetros en Ajustes → Bono. Es un estimado: puede diferir del Reporte de Crédito oficial.</div></div>`;
+  }
+  /* ---------- CLIENTES QUE CUENTAN (colocación del periodo y retos) ----------
+   * El asesor ve nombre, monto y fecha de los créditos que le cuentan. En retos grupales solo ve los suyos
+   * (los de sus compañeros no viajan con nombre en la publicación). */
+  S.vcl = {}; let vclN = 0;
+  function vclBtn(titulo, sub, items, id, total) {
+    const k = 'v' + (++vclN); S.vcl[k] = { titulo, sub, items, id, total };
+    const mine = id ? items.filter((c) => c.asesorId === id) : items;
+    return mine.length ? `<button type="button" class="btn btn-sm btn-soft mt-2" data-vcl="${k}">👥 Ver ${id ? 'mis ' : ''}clientes que cuentan (${mine.length})</button>` : '';
+  }
+  function vclAbrir(k) {
+    const V = S.vcl[k]; if (!V) return;
+    const L = (V.id ? V.items.filter((c) => c.asesorId === V.id) : V.items).slice().sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+    const tot = L.reduce((t, c) => t + (c.monto || 0), 0);
+    const body = `<div class="small text-muted mb-2">${esc(V.sub || '')}</div>
+      <div class="table-responsive"><table class="table table-sm small align-middle mb-0"><thead><tr><th>Cliente</th><th class="text-end">Monto</th><th>Fecha</th></tr></thead><tbody>
+      ${L.map((c) => `<tr><td class="fw-bold">${esc(c.nombre || 'Cliente sin nombre')}${c.ajuste ? ' <span class="badge rounded-pill bg-info-subtle text-info-emphasis">ajuste de cierre</span>' : ''}${c.cierreAnterior ? ' <span class="badge rounded-pill bg-secondary-subtle text-secondary-emphasis">contado en cierre anterior</span>' : ''}</td><td class="text-end num">${U.money(c.monto || 0)}</td><td>${c.fecha ? esc(U.fmtDate(c.fecha)) : '—'}</td></tr>`).join('')}
+      </tbody><tfoot><tr><th>${L.length} crédito${L.length === 1 ? '' : 's'}</th><th class="text-end num">${U.money(tot)}</th><th></th></tr></tfoot></table></div>
+      ${V.total != null ? `<div class="tiny text-muted mt-2">${esc(V.total)}</div>` : ''}
+      <div class="tiny text-muted mt-2">Fecha = fecha de colocación del CRM. Si falta un cliente o un monto no coincide, avísale a tu supervisor para revisar el Funnel.</div>`;
+    openModal(V.titulo, body, '<button class="btn btn-light" data-bs-dismiss="modal">Cerrar</button>');
+  }
+  document.addEventListener('click', (e) => { const b = e.target.closest('[data-vcl]'); if (b) vclAbrir(b.dataset.vcl); });
   function cKpi(m, title) {
     const av = m.avance;
     const w = av == null ? 0 : Math.min(100, av);
@@ -258,6 +358,7 @@
         <div><div class="lbl">${m.faltante > 0 || !m.meta ? 'Me falta' : 'Superada'}</div><div class="val num">${falt}</div></div>
       </div>
       <div class="mt-3">${ritmo}</div>
+      ${vclBtn('Clientes que cuentan · colocación ' + periodTitle(), U.fmtDate(m.range.from) + ' al ' + U.fmtDate(m.range.to) + (S.tipo && S.tipo !== 'Todos' ? ' · tipo ' + S.tipo : ''), m.colocacionesList || [], null)}
     </div>`;
   }
 
@@ -353,6 +454,7 @@
         <div class="fw-bold num">${U.pct(Math.min(ev.progreso, 999), 0)}</div>
       </div>
       <div class="pbar mt-1"><span style="width:${Math.min(100, ev.progreso)}%"></span></div>
+      ${ev.items ? vclBtn('Clientes que cuentan · ' + ev.reto.nombre, U.fmtDate(ev.reto.inicio) + ' al ' + U.fmtDate(ev.reto.fin) + (ev.grupal && currentAsesor() ? ' · reto grupal: aquí ves solo tus créditos' : ''), ev.items, ev.grupal ? currentAsesor() : null, ev.grupal && currentAsesor() ? 'El equipo suma ' + ev.valorFmt + ' en este reto.' : null) : ''}
       <div class="d-flex justify-content-between tiny text-muted mt-1"><span>${U.fmtDateShort(ev.reto.inicio)} – ${U.fmtDateShort(ev.reto.fin)}</span><span>${ev.cumplido ? '¡Felicidades! 🎉' : ev.status === 'en_curso' ? `Te falta: ${ev.faltanteFmt}` : ''}</span></div>
       ${ev.premio && !opts.noPrize ? `<div class="reto-prize"><span class="emo">${esc(ev.premio.emoji || '🎁')}</span><div><div class="t">Premio</div><div class="n">${esc(ev.premio.nombre)}</div></div></div>` : ''}
     </div>`;
@@ -959,6 +1061,7 @@
       return `<div class="grid home">
         ${cPndAviso(id)}
         ${cKpi(m)}
+        ${cBono(id)}
         ${cSaldo([id])}
         ${cEnProceso(id)}
         ${cCreditos(m)}
@@ -1086,6 +1189,7 @@
         <div class="tiny text-muted mt-2">Expedientes = alcanzados en el periodo. Mesa / En expediente = cartera abierta hoy. Autorizados y dispersados cuentan como colocados. Proyección = real + en camino.</div>
       </div>
       ${cPndEquipo()}
+      ${cBonoEquipo()}
       ${cSaldoEquipo()}
       <div class="mt-3">${cReconocimiento()}</div>`;
     },
@@ -1407,7 +1511,7 @@ ${cGanadoresAdm()}
    * ---------------------------------------------------------------- */
   VIEWS.config = {
     html() {
-      const tabs = [['metas', 'Metas y asesores'], ['cierres', 'Cierres de mes'], ['puntos', 'Puntos y logros'], ['reglas', 'Reglas'], ['acceso', 'Acceso y publicación'], ['api', 'API (Fase 2)'], ['historico', 'Histórico y respaldo']];
+      const tabs = [['metas', 'Metas y asesores'], ['cierres', 'Cierres de mes'], ['puntos', 'Puntos y logros'], ['reglas', 'Reglas'], ['bono', 'Bono'], ['acceso', 'Acceso y publicación'], ['api', 'API (Fase 2)'], ['historico', 'Histórico y respaldo']];
       return `<div class="sub-tabs chip-group">${tabs.map(([k, l]) => `<button class="chip ${S.cfgTab === k ? 'active' : ''}" data-cfgtab="${k}">${l}</button>`).join('')}</div>${CFG[S.cfgTab]()}`;
     },
   };
@@ -1456,6 +1560,17 @@ ${cGanadoresAdm()}
       <div class="col-12 col-md-6"><div class="form-check form-switch mt-4"><input class="form-check-input" type="checkbox" id="rkMoney" ${c.privacidad.mostrarRankingMontos ? 'checked' : ''}><label class="form-check-label small" for="rkMoney">Mostrar montos de compañeros en el ranking (si se desactiva, el asesor ve solo % de meta de los demás)</label></div></div>
       <div class="col-12"><label class="form-label small">Mensajes motivacionales (uno por línea; rotan por día)</label><textarea class="form-control" id="msgs" rows="4">${esc(c.mensajes.join('\n'))}</textarea></div>
     </div><button class="btn btn-binco mt-3" data-act="saveReglas">Guardar reglas</button></div>`;
+  };
+  CFG.bono = () => {
+    const P = bonoCfg();
+    const num = (id, v, l, st, help) => `<div class="col-6 col-md-3"><label class="form-label small">${l}</label><input type="number" step="${st || 1}" class="form-control" id="${id}" value="${v}">${help ? `<div class="tiny text-muted">${help}</div>` : ''}</div>`;
+    return `<div class="cardx"><div class="card-title-x"><span>Bono estimado por asesor</span><span>💰</span></div>
+      <div class="form-check form-switch mb-2"><input class="form-check-input" type="checkbox" id="bnActivo" ${P.activo ? 'checked' : ''}><label class="form-check-label" for="bnActivo"><b>Mostrar a cada asesor su bono estimado</b> (solo el suyo, dentro de su enlace cifrado)</label></div>
+      <div class="small text-muted mb-3">Basado en la «Calculadora de Bonos» (esquema v4) sin contactación: créditos 65% y monto 35%, sin candado. Colocación del CRM y la meta de monto y créditos de cada asesor (Ajustes → Metas y asesores). Para que los asesores lo vean: activa, guarda y publica.</div>
+      <div class="row g-3">
+        ${num('bnPC', P.pesoCred, 'Peso créditos (%)')}${num('bnPM', P.pesoMonto, 'Peso monto (%)', 1, 'Los dos pesos deben sumar 100.')}${num('bnCap', P.cap, 'Tope por componente (%)')}${num('bnTope', P.tope, 'Tope del bono ($)', 100)}
+        <div class="col-12"><label class="form-label small">Escalera (un escalón por línea: <b>ICP desde %</b>, <b>bono $</b>)</label><textarea class="form-control font-monospace" id="bnEsc" rows="11">${P.escalera.map((x) => x[0] + ', ' + x[1]).join('\n')}</textarea></div>
+      </div><button class="btn btn-binco mt-3" data-act="saveBono">Guardar bono</button></div>`;
   };
   CFG.acceso = () => {
     const ids = activeIds();
@@ -1673,7 +1788,7 @@ ${cGanadoresAdm()}
   }
   function publicCfg() {
     const c = JSON.parse(JSON.stringify(S.cfg));
-    ['adminPin', 'mappings', 'api', 'asesorAlias', 'stageMap', 'publicUrl', 'teamKey', 'cierres', 'netlify', 'github', 'cambiosSinPublicar', 'ultimaPublicacion', 'historialColocacion'].forEach((k) => delete c[k]);
+    ['adminPin', 'mappings', 'api', 'asesorAlias', 'stageMap', 'publicUrl', 'teamKey', 'cierres', 'netlify', 'github', 'cambiosSinPublicar', 'ultimaPublicacion', 'historialColocacion', 'bono'].forEach((k) => delete c[k]);
     Object.values(c.asesores).forEach((a) => { delete a.pin; delete a.token; });
     return c;
   }
@@ -1701,6 +1816,7 @@ ${cGanadoresAdm()}
         colocaciones: S.ds.colocaciones.filter((c) => c.asesorId === id).map(strip),
         saldo: (S.ds.saldos || {})[id] || null,
         pendientes: pndDe(id),
+        bono: bonoDe(id),
       });
     }
     const json = JSON.stringify(pub);
@@ -1740,7 +1856,7 @@ ${cGanadoresAdm()}
       const saldos = Object.assign({}, team.saldos || {}); if (mine.saldo) saldos[mine.asesorId] = mine.saldo;
       S.ds = { funnel, colocaciones: coloc, asesores, matchStats: team.matchStats, fuenteColocacion: team.fuenteColocacion, saldos, reemplazadas: team.reemplazadas || [] };
       S.publication = true;
-      S.pnd = mine.pendientes || null; S.pndResumen = team.pendResumen || null;
+      S.pnd = mine.pendientes || null; S.bonoMine = mine.bono || null; S.pndResumen = team.pendResumen || null;
       S.session = { role: 'asesor', asesorId: mine.asesorId };
       keySet(token); salioSet(false); // recordar el enlace en este dispositivo
       try { window.localStorage.setItem('binco_reto_nombre', (S.cfg.asesores[mine.asesorId] || {}).nombre || ''); } catch (e) { /* sin almacenamiento */ }
@@ -1887,6 +2003,14 @@ ${cGanadoresAdm()}
         $$('[data-pt]').forEach((i) => { S.cfg.puntos[i.dataset.pt] = Math.max(0, Number(i.value) || 0); });
         $$('[data-lg]').forEach((i) => { S.cfg.logros[i.dataset.lg] = Math.max(0, Number(i.value) || 0); });
         saveCfg(); toast('Puntos y logros guardados.'); return;
+      case 'saveBono': {
+        const n = (id) => Number($('#' + id).value);
+        const esc_ = $('#bnEsc').value.split('\n').map((l) => l.split(/[,;\t]/).map((x) => Number(String(x).replace(/[$\s%]/g, '')))).filter((x) => x.length >= 2 && isFinite(x[0]) && isFinite(x[1]));
+        const P = Object.assign({}, bonoCfg(), { activo: $('#bnActivo').checked, pesoCred: n('bnPC'), pesoMonto: n('bnPM'), pesoCont: 0, gate: 0, gateMult: 1, cap: n('bnCap'), tope: n('bnTope'), escalera: esc_.map((x) => [x[0], x[1]]) });
+        if (Math.abs(P.pesoCred + P.pesoMonto + P.pesoCont - 100) > 0.01) return toast('Los pesos deben sumar 100%.');
+        if (!esc_.length || [P.cap, P.tope].some((v) => !(v > 0))) return toast('Revisa los valores: hay campos vacíos o fuera de rango.');
+        S.cfg.bono = P; saveCfg(); toast(P.activo ? 'Bono guardado. Publica para que cada asesor lo vea.' : 'Bono guardado (apagado para los asesores).'); render(); return;
+      }
       case 'saveReglas': {
         const dias = $$('[data-dia]').filter((i) => i.checked).map((i) => Number(i.dataset.dia));
         if (!dias.length) return toast('Selecciona al menos un día hábil.');

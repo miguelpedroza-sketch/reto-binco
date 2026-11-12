@@ -121,13 +121,16 @@
         && !ds.colocaciones.some((x) => x.contrato === c.contrato && !x.ajuste && x.fecha >= reto.inicio && x.fecha <= reto.fin))
         .filter((c) => { const k = c.funnelKey || c.contrato; if (vistos.has(k)) return false; vistos.add(k); return true; });
       valor += reto.indicador === 'creditos' ? extra.length : extra.reduce((s, c) => s + (Number(c.monto) || 0), 0);
+      // Clientes que cuentan para el reto (para que el asesor los pueda revisar)
+      var items = (m.colocacionesList || []).map((c) => ({ asesorId: c.asesorId, nombre: c.nombre || '', monto: Number(c.monto) || 0, fecha: c.fecha || '', ajuste: !!c.ajuste }))
+        .concat(extra.map((c) => ({ asesorId: c.asesorId, nombre: c.nombre || '', monto: Number(c.monto) || 0, fecha: c.fecha || '', cierreAnterior: true })));
     }
     const meta = Number(reto.meta) || 0;
     const progreso = meta ? (valor / meta) * 100 : 0;
     const premio = (cfg.premios || []).find((p) => p.id === reto.premioId) || null;
     const status = retoStatus(reto, today);
     return {
-      reto, valor, meta, progreso, cumplido: meta > 0 && valor >= meta, grupal, premio, status,
+      reto, valor, meta, progreso, cumplido: meta > 0 && valor >= meta, grupal, premio, status, items: typeof items !== 'undefined' ? items : null,
       faltante: Math.max(0, meta - valor), valorFmt: fmtInd(reto.indicador, valor), metaFmt: fmtInd(reto.indicador, meta), faltanteFmt: fmtInd(reto.indicador, Math.max(0, meta - valor)),
     };
   }
